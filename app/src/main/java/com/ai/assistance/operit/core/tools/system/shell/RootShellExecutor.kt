@@ -27,7 +27,9 @@ class RootShellExecutor(private val context: Context) : ShellExecutor {
 
         // 检查常见的su二进制文件路径
         val suPaths =
-                arrayOf("/system/bin/su", "/system/xbin/su", "/sbin/su", "/system/su", "/su/bin/su")
+                arrayOf("/system/bin/su", "/system/xbin/su", "/sbin/su", "/system/su", "/su/bin/su",
+                    "/sbin/.magisk/mirror/bin/su", "/sbin/.magisk/modules/magiskcore/bin/su",
+                    "/data/adb/magisk/su", "/data/adb/magisk/bin/su", "/debug_ramdisk/su",)
 
         for (path in suPaths) {
             if (File(path).exists()) {
@@ -87,7 +89,7 @@ class RootShellExecutor(private val context: Context) : ShellExecutor {
         // 检查命令是否是run-as格式
         val runAsPattern = """run-as\s+(\S+)\s+sh\s+-c\s+['"](.+)['"]""".toRegex()
         val match = runAsPattern.find(command)
-        
+
         return if (match != null) {
             // 提取内部命令
             val innerCommand = match.groupValues[2]

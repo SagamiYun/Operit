@@ -472,7 +472,8 @@ fun ShizukuDemoScreen(
                                                 val intent = Intent(Intent.ACTION_VIEW)
                                                 intent.data =
                                                         Uri.parse(
-                                                                "https://f-droid.org/packages/com.termux/"
+                                                            // "https://f-droid.org/packages/com.termux/",
+                                                            "https://github.com/termux/termux-app/releases/tag/v0.118.3"
                                                         )
                                                 context.startActivity(intent)
                                             } catch (e: Exception) {
@@ -503,7 +504,9 @@ fun ShizukuDemoScreen(
                                 viewModel.authorizeTermux(context)
                             }
                         },
-                        isTunaSourceEnabled = viewModel.isTunaSourceEnabled.value,
+                        // isTunaSourceEnabled = viewModel.isTunaSourceEnabled.value,
+                        // 海外版默认指定true
+                        isTunaSourceEnabled = true,
                         isPythonInstalled = viewModel.isPythonInstalled.value,
                         isUvInstalled = viewModel.isUvInstalled.value,
                         isNodeInstalled = viewModel.isNodeInstalled.value,

@@ -17,7 +17,8 @@ import java.io.IOException
 class TermuxInstaller {
     companion object {
         private const val TAG = "TermuxInstaller"
-        private const val TERMUX_APK_FILENAME = "termux.apk"
+        private const val TERMUX_ARM_APK_FILENAME = "termux_debug_arm64.apk"
+        private const val TERMUX_X86_APK_FILENAME = "termux_debug_x86_64.apk"
         private const val TERMUX_PACKAGE_NAME = "com.termux"
 
         // 状态变更监听器
@@ -67,10 +68,11 @@ class TermuxInstaller {
 
         /** 从assets目录复制Termux APK到应用私有目录 */
         private fun extractApkFromAssets(context: Context): File? {
-            val apkFile = File(context.cacheDir, TERMUX_APK_FILENAME)
+            val appropriateTermuxApk = getAppropriateTermuxApk(getDeviceArchitecture(context))
+            val apkFile = File(context.cacheDir, appropriateTermuxApk)
 
             try {
-                context.assets.open(TERMUX_APK_FILENAME).use { inputStream ->
+                context.assets.open(appropriateTermuxApk).use { inputStream ->
                     FileOutputStream(apkFile).use { outputStream ->
                         inputStream.copyTo(outputStream)
                     }
@@ -79,6 +81,37 @@ class TermuxInstaller {
             } catch (e: IOException) {
                 Log.e(TAG, "Failed to extract Termux APK from assets", e)
                 return null
+            }
+        }
+
+        private fun getAppropriateTermuxApk(architecture: String): String {
+            return when (architecture) {
+                "arm64-v8a" -> TERMUX_ARM_APK_FILENAME
+                "x86" -> TERMUX_X86_APK_FILENAME
+                // "armeabi-v7a" -> "termux-arm.apk"
+                // "x86_64" -> "termux-x86_64.apk"
+                else -> TERMUX_ARM_APK_FILENAME
+            }
+        }
+
+        private fun getDeviceArchitecture(context: Context): String{
+            // 首选方法：使用Android API
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                return Build.SUPPORTED_ABIS[0]
+            }
+
+            // 备选方法：使用系统命令
+            return try {
+                val processBuilder = ProcessBuilder("getprop", "ro.product.cpu.abi")
+                val process = processBuilder.start()
+                val reader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream))
+                val cpuAbi = reader.readLine() ?: "Unknown"
+                process.waitFor()
+                reader.close()
+                cpuAbi
+            } catch (e: Exception) {
+                // 如果都失败了，尝试使用已弃用但仍可用的API
+                Build.CPU_ABI
             }
         }
 
@@ -146,4 +179,5 @@ class TermuxInstaller {
             }
         }
     }
+
 }
