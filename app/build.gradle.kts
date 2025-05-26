@@ -248,4 +248,8 @@ dependencies {
 
     // Color picker for theme customization
     implementation("com.github.skydoves:colorpicker-compose:1.0.6")
+
+    // Gemini SDK
+    implementation ("com.google.ai.client.generativeai:common:0.10.0")
+    implementation ("com.google.ai.client.generativeai:generativeai:0.9.0")
 }

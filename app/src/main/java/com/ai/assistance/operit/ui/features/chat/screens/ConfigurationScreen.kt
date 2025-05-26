@@ -20,6 +20,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ai.assistance.operit.api.LLMProviderFactory
 import com.ai.assistance.operit.data.preferences.ApiPreferences
 import com.ai.assistance.operit.data.preferences.FreeUsagePreferences
 import com.ai.assistance.operit.ui.features.chat.components.config.*
@@ -31,20 +32,21 @@ import kotlinx.coroutines.launch
 /** 简洁风格的AI助手配置界面 */
 @Composable
 fun ConfigurationScreen(
-        apiEndpoint: String,
-        apiKey: String,
-        modelName: String,
-        onApiEndpointChange: (String) -> Unit,
-        onApiKeyChange: (String) -> Unit,
-        onModelNameChange: (String) -> Unit,
-        onSaveConfig: () -> Unit,
-        onError: (String) -> Unit,
-        coroutineScope: CoroutineScope,
-        onUseDefault: () -> Unit = {},
-        isUsingDefault: Boolean = false,
-        onNavigateToChat: () -> Unit = {},
-        onNavigateToTokenConfig: () -> Unit = {},
-        onNavigateToSettings: () -> Unit = {}
+    apiEndpoint: String,
+    apiProviderType: LLMProviderFactory.ProviderType,
+    apiKey: String,
+    modelName: String,
+    onApiEndpointChange: (String) -> Unit,
+    onApiKeyChange: (String) -> Unit,
+    onModelNameChange: (String) -> Unit,
+    onSaveConfig: () -> Unit,
+    onError: (String) -> Unit,
+    coroutineScope: CoroutineScope,
+    onUseDefault: () -> Unit = {},
+    isUsingDefault: Boolean = false,
+    onNavigateToChat: () -> Unit = {},
+    onNavigateToTokenConfig: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {}
 ) {
     // 获取Context
     val context = LocalContext.current

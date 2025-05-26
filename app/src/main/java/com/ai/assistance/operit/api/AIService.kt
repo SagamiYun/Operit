@@ -2,6 +2,8 @@ package com.ai.assistance.operit.api
 
 import android.util.Log
 import com.ai.assistance.operit.data.model.ModelParameter
+import com.ai.assistance.operit.data.preferences.ApiPreferences.Companion.DEFAULT_MODEL_NAME
+import com.ai.assistance.operit.data.preferences.ApiPreferences.Companion.DEFAULT_API_ENDPOINT as DEF_API_ENDPOINT
 import com.ai.assistance.operit.util.ChatUtils
 import java.io.IOException
 import java.net.SocketTimeoutException
@@ -16,11 +18,25 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 
+/**
+ * AIService for DeepSeek API integration, implements the common LLMProvider interface
+ */
 class AIService(
         private val apiEndpoint: String,
         private val apiKey: String,
         private val modelName: String
-) {
+) : LLMProvider {
+    companion object {
+        private const val TAG = "AIService"
+        
+        // Default DeepSeek models
+        const val DEEPSEEK_CHAT = DEFAULT_MODEL_NAME
+        const val DEEPSEEK_CODER = "deepseek-coder"
+        
+        // Default DeepSeek endpoint
+        const val DEFAULT_API_ENDPOINT = DEF_API_ENDPOINT
+    }
+    
     private val client =
             OkHttpClient.Builder()
                     .connectTimeout(30, TimeUnit.SECONDS)
@@ -38,9 +54,9 @@ class AIService(
     private var _outputTokenCount = 0
 
     // 公开token计数
-    val inputTokenCount: Int
+    override val inputTokenCount: Int
         get() = _inputTokenCount
-    val outputTokenCount: Int
+    override val outputTokenCount: Int
         get() = _outputTokenCount
 
     // Token计数逻辑
@@ -53,7 +69,7 @@ class AIService(
     }
 
     // 重置token计数
-    fun resetTokenCounts() {
+    override fun resetTokenCounts() {
         _inputTokenCount = 0
         _outputTokenCount = 0
     }
@@ -83,7 +99,7 @@ class AIService(
     }
 
     // 取消当前流式传输
-    fun cancelStreaming() {
+    override fun cancelStreaming() {
         activeCall?.let {
             if (!it.isCanceled()) {
                 it.cancel()
@@ -371,13 +387,13 @@ class AIService(
         activeCall = null
     }
 
-    suspend fun sendMessage(
+    override suspend fun sendMessage(
             message: String,
             onPartialResponse: (content: String, thinking: String?) -> Unit,
-            chatHistory: List<Pair<String, String>> = emptyList(),
-            onComplete: () -> Unit = {},
-            onConnectionStatus: ((status: String) -> Unit)? = null,
-            modelParameters: List<ModelParameter<*>> = emptyList()
+            chatHistory: List<Pair<String, String>>,
+            onComplete: () -> Unit,
+            onConnectionStatus: ((status: String) -> Unit)?,
+            modelParameters: List<ModelParameter<*>>
     ) =
             withContext(Dispatchers.IO) {
                 // 重置token计数
@@ -392,7 +408,7 @@ class AIService(
                 val requestBody = createRequestBody(message, standardizedHistory, modelParameters)
                 val request = createRequest(requestBody)
 
-                onConnectionStatus?.invoke("准备连接到AI服务...")
+                onConnectionStatus?.invoke("准备连接到DeepSeek AI服务...")
                 while (retryCount < maxRetries) {
                     try {
                         // 创建Call对象并保存到activeCall中，以便可以取消

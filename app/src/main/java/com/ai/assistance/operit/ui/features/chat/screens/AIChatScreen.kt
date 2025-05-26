@@ -81,6 +81,7 @@ fun AIChatScreen(
 
         // Collect state from ViewModel
         val apiKey by actualViewModel.apiKey.collectAsState()
+        val apiProviderType by actualViewModel.apiProviderType.collectAsState()
         val apiEndpoint by actualViewModel.apiEndpoint.collectAsState()
         val modelName by actualViewModel.modelName.collectAsState()
         val isConfigured by actualViewModel.isConfigured.collectAsState()
@@ -594,6 +595,7 @@ fun AIChatScreen(
                 if (shouldShowConfig) {
                         ConfigurationScreen(
                                 apiEndpoint = apiEndpoint,
+                                apiProviderType = apiProviderType,
                                 apiKey = apiKey,
                                 modelName = modelName,
                                 onApiEndpointChange = { actualViewModel.updateApiEndpoint(it) },

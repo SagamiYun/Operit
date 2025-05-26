@@ -2,8 +2,8 @@ package com.ai.assistance.operit.ui.features.chat.viewmodel
 
 import android.content.Context
 import android.util.Log
-import androidx.lifecycle.viewModelScope
 import com.ai.assistance.operit.api.EnhancedAIService
+import com.ai.assistance.operit.api.LLMProviderFactory
 import com.ai.assistance.operit.data.preferences.ApiPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -30,6 +30,9 @@ class ApiConfigDelegate(
     // State flows
     private val _apiKey = MutableStateFlow("")
     val apiKey: StateFlow<String> = _apiKey.asStateFlow()
+
+    private val _apiProviderType = MutableStateFlow(LLMProviderFactory.ProviderType.DEEPSEEK)
+    val apiProviderType: StateFlow<LLMProviderFactory.ProviderType> =_apiProviderType.asStateFlow()
 
     private val _apiEndpoint = MutableStateFlow(ApiPreferences.DEFAULT_API_ENDPOINT)
     val apiEndpoint: StateFlow<String> = _apiEndpoint.asStateFlow()
@@ -63,6 +66,14 @@ class ApiConfigDelegate(
         viewModelScope.launch {
             apiPreferences.apiKeyFlow.collect { key ->
                 _apiKey.value = key
+                checkAndInitializeService()
+            }
+        }
+
+        // Load API Provider
+        viewModelScope.launch {
+            apiPreferences.providerTypeFlow.collect { key ->
+                _apiProviderType.value = LLMProviderFactory.ProviderType.valueOf(key)
                 checkAndInitializeService()
             }
         }
@@ -110,8 +121,13 @@ class ApiConfigDelegate(
         val key = _apiKey.value
         val endpoint = _apiEndpoint.value
         val model = _modelName.value
+        val providerType = _apiProviderType.value
 
-        if (key.isNotBlank() && endpoint.isNotBlank() && model.isNotBlank()) {
+        if (key.isNotBlank() &&
+            endpoint.isNotBlank() &&
+            model.isNotBlank() &&
+            providerType.toString().isNotBlank())
+        {
             // 取消任何之前的初始化任务
             serviceInitJob?.cancel()
             configUpdateCount++
@@ -124,7 +140,8 @@ class ApiConfigDelegate(
                 if (currentUpdateCount == configUpdateCount) {
                     Log.d(TAG, "初始化EnhancedAIService (apiKey=${key.take(5)}..., endpoint=$endpoint, model=$model)")
                     // 创建新的AI服务实例
-                    val enhancedAiService = EnhancedAIService(endpoint, key, model, context)
+                    val enhancedAiService = EnhancedAIService(endpoint, key, model,
+                        providerType, context)
 
                     // 通知ViewModel配置已更改
                     onConfigChanged(enhancedAiService)
@@ -161,7 +178,8 @@ class ApiConfigDelegate(
             // 直接调用初始化服务 - 无需防抖机制，因为这是用户主动操作
             Log.d(TAG, "保存API设置并初始化服务")
             val enhancedAiService =
-                    EnhancedAIService(_apiEndpoint.value, _apiKey.value, _modelName.value, context)
+                    EnhancedAIService(_apiEndpoint.value, _apiKey.value, _modelName.value,
+                        _apiProviderType.value, context)
 
             // 通知ViewModel配置已更改
             onConfigChanged(enhancedAiService)
@@ -178,16 +196,18 @@ class ApiConfigDelegate(
     fun useDefaultConfig(): Boolean {
         // 检查是否有可用的默认配置
         if (_apiEndpoint.value.isNotBlank() &&
-                        _apiKey.value.isNotBlank() &&
-                        _modelName.value.isNotBlank()
-        ) {
+            _apiKey.value.isNotBlank() &&
+            _modelName.value.isNotBlank() &&
+            _apiProviderType.value.toString().isNotBlank())
+        {
             // 直接标记为已配置
             _isConfigured.value = true
 
             // 初始化AI服务
             Log.d(TAG, "使用默认配置初始化服务")
             val enhancedAiService =
-                    EnhancedAIService(_apiEndpoint.value, _apiKey.value, _modelName.value, context)
+                    EnhancedAIService(_apiEndpoint.value, _apiKey.value, _modelName.value,
+                        _apiProviderType.value, context)
 
             // 通知ViewModel配置已更改
             onConfigChanged(enhancedAiService)

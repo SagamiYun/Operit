@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.ui.features.settings.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -17,6 +18,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ai.assistance.operit.R
+import com.ai.assistance.operit.api.LLMProviderFactory
 import com.ai.assistance.operit.data.preferences.ApiPreferences
 import com.ai.assistance.operit.data.repository.ChatHistoryManager
 import com.ai.assistance.operit.util.ModelEndPointFix
@@ -65,6 +67,12 @@ fun SettingsScreen(
                             initial = ApiPreferences.DEFAULT_AUTO_GRANT_ACCESSIBILITY
                     )
                     .value
+    // Collect provider type state
+    val providerType = 
+            apiPreferences.providerTypeFlow.collectAsState(
+                        initial = ApiPreferences.DEFAULT_PROVIDER_TYPE
+                    )
+                    .value
 
     // Mutable state for editing
     var apiKeyInput by remember { mutableStateOf(apiKey) }
@@ -75,6 +83,7 @@ fun SettingsScreen(
     var showFpsCounterInput by remember { mutableStateOf(showFpsCounter) }
     var autoGrantAccessibilityInput by remember { mutableStateOf(autoGrantAccessibility) }
     var showSaveSuccessMessage by remember { mutableStateOf(false) }
+    var selectedProviderTypeInput by remember { mutableStateOf(providerType) }
 
     // Add state for endpoint warning
     var endpointWarningMessage by remember { mutableStateOf<String?>(null) }
@@ -83,10 +92,57 @@ fun SettingsScreen(
     // Add state to check if using default API key
     val isUsingDefaultApiKey = apiKeyInput == ApiPreferences.DEFAULT_API_KEY
     var showModelRestrictionInfo by remember { mutableStateOf(isUsingDefaultApiKey) }
+    
+    // Track previous provider type to detect changes
+    var previousProviderType by remember { mutableStateOf(selectedProviderTypeInput) }
+    var isProviderChangedManually by remember { mutableStateOf(false) }
+
+    // Get available models for the current provider
+    val availableModels = remember(selectedProviderTypeInput) {
+        try {
+            val providerEnum = LLMProviderFactory.ProviderType.valueOf(selectedProviderTypeInput)
+            LLMProviderFactory.getAvailableModels(providerEnum)
+        } catch (e: Exception) {
+            listOf(ApiPreferences.DEFAULT_MODEL_NAME)
+        }
+    }
+
+    // Update endpoint to default for selected provider
+    LaunchedEffect(selectedProviderTypeInput) {
+        try {
+            val providerEnum = LLMProviderFactory.ProviderType.valueOf(selectedProviderTypeInput)
+            val defaultEndpoint = LLMProviderFactory.getDefaultEndpoint(providerEnum)
+            val defaultModel = LLMProviderFactory.getDefaultModel(providerEnum)
+            
+            // Always update endpoint when provider changes
+            if (isProviderChangedManually && selectedProviderTypeInput != previousProviderType) {
+                apiEndpointInput = defaultEndpoint
+            }
+            
+            // Update model name if it's not in available models for this provider
+            if (!availableModels.contains(modelNameInput)) {
+                modelNameInput = defaultModel
+            }
+            
+            // Update previous provider type
+            previousProviderType = selectedProviderTypeInput
+            isProviderChangedManually = false
+            
+        } catch (e: Exception) {
+            // If there's an error, use default values
+            apiEndpointInput = ApiPreferences.DEFAULT_API_ENDPOINT
+            modelNameInput = ApiPreferences.DEFAULT_MODEL_NAME
+        }
+    }
 
     // Force deepseek-chat model when using default API key
-    LaunchedEffect(apiKeyInput) {
+    LaunchedEffect(apiKeyInput, selectedProviderTypeInput) {
         if (apiKeyInput == ApiPreferences.DEFAULT_API_KEY) {
+            // When using default API key, force DEEPSEEK provider and deepseek-chat model
+            if (selectedProviderTypeInput != LLMProviderFactory.ProviderType.DEEPSEEK.name) {
+                isProviderChangedManually = true
+                selectedProviderTypeInput = LLMProviderFactory.ProviderType.DEEPSEEK.name
+            }
             modelNameInput = ApiPreferences.DEFAULT_MODEL_NAME
             showModelRestrictionInfo = true
         } else {
@@ -102,7 +158,8 @@ fun SettingsScreen(
             showThinking,
             memoryOptimization,
             showFpsCounter,
-            autoGrantAccessibility
+            autoGrantAccessibility,
+            providerType
     ) {
         apiKeyInput = apiKey
         apiEndpointInput = apiEndpoint
@@ -111,6 +168,27 @@ fun SettingsScreen(
         memoryOptimizationInput = memoryOptimization
         showFpsCounterInput = showFpsCounter
         autoGrantAccessibilityInput = autoGrantAccessibility
+        selectedProviderTypeInput = providerType
+    }
+    
+    // Initialize endpoint on first load
+    LaunchedEffect(Unit) {
+        try {
+            val providerEnum = LLMProviderFactory.ProviderType.valueOf(selectedProviderTypeInput)
+            val defaultEndpoint = LLMProviderFactory.getDefaultEndpoint(providerEnum)
+            
+            // Only update endpoint if it's empty or one of the defaults
+            if (apiEndpointInput.isBlank() || 
+                apiEndpointInput == ApiPreferences.DEFAULT_API_ENDPOINT || 
+                apiEndpointInput == ApiPreferences.DEFAULT_GEMINI_API_ENDPOINT) {
+                apiEndpointInput = defaultEndpoint
+            }
+        } catch (e: Exception) {
+            // If there's an error, use default values
+            if (apiEndpointInput.isBlank()) {
+                apiEndpointInput = ApiPreferences.DEFAULT_API_ENDPOINT
+            }
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
@@ -165,16 +243,88 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.titleMedium
                     )
                 }
+                
+                // Provider type selector
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                    Text(
+                        text = "LLM服务提供商",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    
+                    // Provider dropdown
+                    Box(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        var expanded by remember { mutableStateOf(false) }
+                        
+                        OutlinedTextField(
+                            value = selectedProviderTypeInput,
+                            onValueChange = {},
+                            readOnly = true,
+                            enabled = !isUsingDefaultApiKey, // Disable when using default API key
+                            modifier = Modifier.fillMaxWidth(),
+                            trailingIcon = {
+                                IconButton(onClick = { if (!isUsingDefaultApiKey) expanded = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowDropDown,
+                                        contentDescription = "选择提供商"
+                                    )
+                                }
+                            }
+                        )
+                        
+                        // Clickable transparent overlay to open dropdown
+                        if (!isUsingDefaultApiKey) {
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { expanded = true }
+                            )
+                        }
+                        
+                        DropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false },
+                            modifier = Modifier.fillMaxWidth(0.9f)
+                        ) {
+                            LLMProviderFactory.ProviderType.values().forEach { provider ->
+                                DropdownMenuItem(
+                                    text = { Text(provider.name) },
+                                    onClick = {
+                                        // Set flag to indicate manual provider change
+                                        isProviderChangedManually = true
+                                        // Update selection
+                                        selectedProviderTypeInput = provider.name
+                                        expanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    
+                    // Provider info message
+                    Text(
+                        text = "切换服务提供商将自动更新API端点为该提供商的默认值",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+                    )
+                }
 
                 OutlinedTextField(
                         value = apiEndpointInput,
                         onValueChange = {
                             apiEndpointInput = it
 
-                            // Check if the endpoint contains 'completions' path
-                            if (it.isNotBlank() && !ModelEndPointFix.containsCompletionsPath(it)) {
-                                endpointWarningMessage = "提示：API地址应包含补全路径，如v1/chat/completions"
-                                showEndpointWarning = true
+                            // Check if the endpoint contains appropriate path based on provider
+                            if (selectedProviderTypeInput == LLMProviderFactory.ProviderType.DEEPSEEK.name) {
+                                if (it.isNotBlank() && !ModelEndPointFix.containsCompletionsPath(it)) {
+                                    endpointWarningMessage = "提示：DeepSeek API地址应包含补全路径，如v1/chat/completions"
+                                    showEndpointWarning = true
+                                } else {
+                                    showEndpointWarning = false
+                                }
                             } else {
                                 showEndpointWarning = false
                             }
@@ -202,6 +352,7 @@ fun SettingsScreen(
                             // 当API密钥改变时立即检查是否需要限制模型名称
                             if (it == ApiPreferences.DEFAULT_API_KEY) {
                                 modelNameInput = ApiPreferences.DEFAULT_MODEL_NAME
+                                selectedProviderTypeInput = LLMProviderFactory.ProviderType.DEEPSEEK.name
                                 showModelRestrictionInfo = true
                             } else {
                                 showModelRestrictionInfo = false
@@ -212,46 +363,88 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
                 )
 
-                OutlinedTextField(
-                        value = modelNameInput,
-                        onValueChange = {
-                            // Only allow changing model name when not using
-                            // default API key
-                            if (!isUsingDefaultApiKey) {
-                                modelNameInput = it
-                            }
-                        },
-                        label = { Text(stringResource(id = R.string.model_name)) },
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                        enabled = !isUsingDefaultApiKey,
-                        colors =
+                // Model selection dropdown
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                    Text(
+                        text = stringResource(id = R.string.model_name),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    
+                    Box(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        var expanded by remember { mutableStateOf(false) }
+                        
+                        OutlinedTextField(
+                            value = modelNameInput,
+                            onValueChange = {},
+                            readOnly = true,
+                            enabled = !isUsingDefaultApiKey,
+                            modifier = Modifier.fillMaxWidth(),
+                            trailingIcon = {
+                                IconButton(onClick = { if (!isUsingDefaultApiKey) expanded = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowDropDown,
+                                        contentDescription = "选择模型"
+                                    )
+                                }
+                            },
+                            colors =
                                 OutlinedTextFieldDefaults.colors(
-                                        disabledTextColor =
-                                                if (isUsingDefaultApiKey)
-                                                        MaterialTheme.colorScheme.primary
-                                                else
-                                                        MaterialTheme.colorScheme.onSurface.copy(
-                                                                alpha = 0.38f
-                                                        ),
-                                        disabledBorderColor =
-                                                if (isUsingDefaultApiKey)
-                                                        MaterialTheme.colorScheme.primary.copy(
-                                                                alpha = 0.3f
-                                                        )
-                                                else
-                                                        MaterialTheme.colorScheme.outline.copy(
-                                                                alpha = 0.12f
-                                                        ),
-                                        disabledLabelColor =
-                                                if (isUsingDefaultApiKey)
-                                                        MaterialTheme.colorScheme.primary.copy(
-                                                                alpha = 0.7f
-                                                        )
-                                                else
-                                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                                                .copy(alpha = 0.38f)
+                                    disabledTextColor =
+                                            if (isUsingDefaultApiKey)
+                                                    MaterialTheme.colorScheme.primary
+                                            else
+                                                    MaterialTheme.colorScheme.onSurface.copy(
+                                                            alpha = 0.38f
+                                                    ),
+                                    disabledBorderColor =
+                                            if (isUsingDefaultApiKey)
+                                                    MaterialTheme.colorScheme.primary.copy(
+                                                            alpha = 0.3f
+                                                    )
+                                            else
+                                                    MaterialTheme.colorScheme.outline.copy(
+                                                            alpha = 0.12f
+                                                    ),
+                                    disabledLabelColor =
+                                            if (isUsingDefaultApiKey)
+                                                    MaterialTheme.colorScheme.primary.copy(
+                                                            alpha = 0.7f
+                                                    )
+                                            else
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                            .copy(alpha = 0.38f)
+                            )
+                        )
+                        
+                        // Clickable transparent overlay to open dropdown
+                        if (!isUsingDefaultApiKey) {
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { expanded = true }
+                            )
+                        }
+                        
+                        DropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false },
+                            modifier = Modifier.fillMaxWidth(0.9f)
+                        ) {
+                            availableModels.forEach { model ->
+                                DropdownMenuItem(
+                                    text = { Text(model) },
+                                    onClick = {
+                                        modelNameInput = model
+                                        expanded = false
+                                    }
                                 )
-                )
+                            }
+                        }
+                    }
+                }
 
                 // Show model restriction message when using default API key
                 if (showModelRestrictionInfo) {
@@ -270,8 +463,9 @@ fun SettingsScreen(
                             onClick = {
                                 scope.launch {
                                     // Check if the endpoint might be missing
-                                    // completions path
-                                    if (apiEndpointInput.isNotBlank() &&
+                                    // completions path for DeepSeek
+                                    if (selectedProviderTypeInput == LLMProviderFactory.ProviderType.DEEPSEEK.name &&
+                                                    apiEndpointInput.isNotBlank() &&
                                                     !ModelEndPointFix.containsCompletionsPath(
                                                             apiEndpointInput
                                                     )
@@ -281,14 +475,23 @@ fun SettingsScreen(
                                         showEndpointWarning = true
                                     }
 
-                                    // Force deepseek-chat model when using
-                                    // default API key
+                                    // Force deepseek-chat model when using default API key
                                     val modelToSave =
                                             if (apiKeyInput == ApiPreferences.DEFAULT_API_KEY) {
                                                 ApiPreferences.DEFAULT_MODEL_NAME
                                             } else {
                                                 modelNameInput
                                             }
+                                    
+                                    // Save provider type
+                                    val providerTypeToSave = 
+                                            if (apiKeyInput == ApiPreferences.DEFAULT_API_KEY) {
+                                                LLMProviderFactory.ProviderType.DEEPSEEK.name
+                                            } else {
+                                                selectedProviderTypeInput
+                                            }
+                                    
+                                    apiPreferences.saveProviderType(providerTypeToSave)
 
                                     // 修改：使用单独的方法保存API和模型设置，不影响模型参数
                                     apiPreferences.saveApiSettings(
@@ -330,7 +533,7 @@ fun SettingsScreen(
         // 模型参数设置卡片
         SettingsCard(
                 title = "模型参数设置",
-                description = "配置DeepSeek大模型的参数，包括温度、Token生成数量、采样方式和惩罚系数等",
+                description = "配置大模型的参数，包括温度、Token生成数量、采样方式和惩罚系数等",
                 onClick = navigateToModelParameters,
                 buttonText = "配置模型参数",
                 icon = Icons.Default.Tune

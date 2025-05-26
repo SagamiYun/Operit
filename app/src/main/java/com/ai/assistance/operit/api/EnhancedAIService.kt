@@ -45,14 +45,20 @@ class EnhancedAIService(
         apiEndpoint: String,
         apiKey: String,
         modelName: String,
+        private val providerType: LLMProviderFactory.ProviderType,
         private val context: Context
 ) {
     companion object {
         private const val TAG = "EnhancedAIService"
     }
 
-    // Use composition for the base AIService
-    private val aiService = AIService(apiEndpoint, apiKey, modelName)
+    // Use composition for the base LLM provider service
+    private val llmProvider: LLMProvider = LLMProviderFactory.createProvider(
+        providerType,
+        apiEndpoint,
+        apiKey,
+        modelName
+    )
 
     // Tool handler for executing tools
     private val toolHandler = AIToolHandler.getInstance(context)
@@ -249,7 +255,7 @@ class EnhancedAIService(
             )
 
             withContext(Dispatchers.IO) {
-                aiService.sendMessage(
+                llmProvider.sendMessage(
                         message = processedInput,
                         onPartialResponse = { content, thinking ->
                             // First response received, update to receiving state
@@ -555,7 +561,7 @@ class EnhancedAIService(
         isConversationActive.set(false)
 
         // Cancel underlying AIService streaming
-        aiService.cancelStreaming()
+        llmProvider.cancelStreaming()
 
         // Cancel all tool executions
         cancelAllToolExecutions()
@@ -898,7 +904,7 @@ class EnhancedAIService(
                         toolHandler,
                         conversationHistory,
                         displayContent,
-                        aiService
+                        llmProvider
                 )
             }
         }
@@ -1000,7 +1006,7 @@ class EnhancedAIService(
 
         // Direct request AI response in current flow, keeping in complete main loop
         withContext(Dispatchers.IO) {
-            aiService.sendMessage(
+            llmProvider.sendMessage(
                     message = toolResultMessage,
                     onPartialResponse = { content, thinking ->
                         // Only handle display, not any tool logic
@@ -1049,14 +1055,14 @@ class EnhancedAIService(
     }
 
     // Expose base AIService for token counting
-    fun getBaseAIService(): AIService = aiService
+    fun getBaseAIService(): LLMProvider = llmProvider
 
     /**
      * Get the current input token count from the last API call
      * @return The number of input tokens used in the most recent request
      */
     fun getCurrentInputTokenCount(): Int {
-        return aiService.inputTokenCount
+        return llmProvider.inputTokenCount
     }
 
     /**
@@ -1064,12 +1070,12 @@ class EnhancedAIService(
      * @return The number of output tokens generated in the most recent response
      */
     fun getCurrentOutputTokenCount(): Int {
-        return aiService.outputTokenCount
+        return llmProvider.outputTokenCount
     }
 
     /** Reset token counters to zero Use this when starting a new conversation */
     fun resetTokenCounters() {
-        aiService.resetTokenCounts()
+        llmProvider.resetTokenCounts()
     }
 
     /**
@@ -1180,7 +1186,7 @@ class EnhancedAIService(
             // 使用aiService发送直接请求
             var summaryContent = ""
 
-            aiService.sendMessage(
+            llmProvider.sendMessage(
                     message = "请按照要求总结对话内容",
                     onPartialResponse = { content, _ -> summaryContent = content },
                     chatHistory = finalMessages,
@@ -1195,8 +1201,8 @@ class EnhancedAIService(
             }
 
             // 获取本次总结生成的token统计
-            val inputTokens = aiService.inputTokenCount
-            val outputTokens = aiService.outputTokenCount
+            val inputTokens = llmProvider.inputTokenCount
+            val outputTokens = llmProvider.outputTokenCount
 
             // 将总结token计数添加到用户偏好分析的token统计中
             try {

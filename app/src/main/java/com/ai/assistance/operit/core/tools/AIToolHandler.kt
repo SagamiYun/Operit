@@ -59,6 +59,13 @@ class AIToolHandler private constructor(private val context: Context) {
                         "<tool[\\s\\n]+name\\s*=\\s*[\"']([^\"']+)[\"'](?:[\\s\\n]+description\\s*=\\s*[\"']([^\"']+)[\"'])?[^>]*>([\\s\\S]*?)</tool>",
                         Pattern.DOTALL
                 )
+                
+        // 识别简化的工具调用格式，如<toolname="list_files">/sdcard/
+        private val SIMPLIFIED_TOOL_PATTERN =
+                Pattern.compile(
+                        "<toolname=\"([^\"]+)\">([\\s\\S]*?)(?:<|\n|\r|$)",
+                        Pattern.DOTALL
+                )
     }
 
     // Tool execution state
@@ -481,8 +488,17 @@ class AIToolHandler private constructor(private val context: Context) {
         // Add more comprehensive logging for debugging
         Log.d(TAG, "Extracting tool invocations from response of length: ${response.length}")
 
-        // Then check for regular tools
+        // First try with regular tool patterns
         val invocations = extractToolInvocationsInternal(response)
+        
+        // If no regular invocations found, try with simplified format
+        if (invocations.isEmpty()) {
+            val simplifiedInvocations = extractSimplifiedToolInvocations(response)
+            if (simplifiedInvocations.isNotEmpty()) {
+                Log.d(TAG, "Found ${simplifiedInvocations.size} simplified tool invocations: ${simplifiedInvocations.map { it.tool.name }}")
+                return simplifiedInvocations
+            }
+        }
 
         Log.d(
                 TAG,
@@ -596,6 +612,84 @@ class AIToolHandler private constructor(private val context: Context) {
             }
         }
 
+        return invocations
+    }
+
+    /**
+     * 提取简化格式的工具调用
+     * 处理类似 <toolname="list_files">/sdcard/ 这样的格式
+     */
+    private fun extractSimplifiedToolInvocations(response: String): List<ToolInvocation> {
+        val invocations = mutableListOf<ToolInvocation>()
+        val matcher = SIMPLIFIED_TOOL_PATTERN.matcher(response)
+        
+        while (matcher.find()) {
+            try {
+                val rawText = matcher.group(0) ?: continue
+                val toolName = matcher.group(1) ?: continue
+                val toolValue = matcher.group(2)?.trim() ?: ""
+                val start = matcher.start()
+                val end = matcher.end()
+                
+                Log.d(TAG, "Found simplified tool invocation: $toolName with value: $toolValue at position $start-$end")
+                
+                // 构建参数列表
+                val parameters = when {
+                    // 如果工具名称包含list_files并且有路径值
+                    toolName == "list_files" && toolValue.isNotEmpty() -> {
+                        listOf(ToolParameter("path", toolValue))
+                    }
+                    // 如果工具名称包含find_files或search_files并且有查询值
+                    toolName.contains("find_files") || toolName.contains("search_files") -> {
+                        if (":" in toolValue) {
+                            val parts = toolValue.split(":", limit = 2)
+                            listOf(
+                                ToolParameter("path", parts[0].trim()),
+                                ToolParameter("pattern", parts[1].trim())
+                            )
+                        } else {
+                            listOf(ToolParameter("query", toolValue))
+                        }
+                    }
+                    // 如果工具名称包含read_file并且有文件路径
+                    toolName.contains("read_file") -> {
+                        listOf(ToolParameter("path", toolValue))
+                    }
+                    // 如果工具名称包含write_file并且有内容
+                    toolName.contains("write_file") -> {
+                        if (":" in toolValue) {
+                            val parts = toolValue.split(":", limit = 2)
+                            listOf(
+                                ToolParameter("path", parts[0].trim()),
+                                ToolParameter("content", parts[1].trim())
+                            )
+                        } else {
+                            listOf(ToolParameter("path", toolValue))
+                        }
+                    }
+                    // 如果工具名称包含calculate并且有表达式
+                    toolName.contains("calculate") -> {
+                        listOf(ToolParameter("expression", toolValue))
+                    }
+                    // 其他情况，使用通用参数
+                    else -> {
+                        listOf(ToolParameter("value", toolValue))
+                    }
+                }
+                
+                val tool = AITool(name = toolName, parameters = parameters)
+                invocations.add(
+                    ToolInvocation(
+                        tool = tool,
+                        rawText = rawText,
+                        responseLocation = start..end
+                    )
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing simplified tool invocation", e)
+            }
+        }
+        
         return invocations
     }
 

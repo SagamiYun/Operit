@@ -24,6 +24,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.animation.AnimatedVisibility
+import com.ai.assistance.operit.api.LLMProviderFactory
 import com.ai.assistance.operit.data.model.ModelParameter
 import com.ai.assistance.operit.data.model.ParameterCategory
 import com.ai.assistance.operit.data.model.ParameterValueType
@@ -45,6 +46,18 @@ fun ModelParametersSettingsScreen() {
     
     // State for all parameters
     var parameters by remember { mutableStateOf<List<ModelParameter<*>>>(emptyList()) }
+    
+    // Get the current provider type
+    val providerType = apiPreferences.providerTypeFlow.collectAsState(
+        initial = ApiPreferences.DEFAULT_PROVIDER_TYPE
+    ).value
+    
+    // Convert provider type string to enum
+    val currentProviderType = try {
+        LLMProviderFactory.ProviderType.valueOf(providerType)
+    } catch (e: Exception) {
+        LLMProviderFactory.ProviderType.DEEPSEEK
+    }
     
     // Load parameters from preferences
     LaunchedEffect(Unit) {
@@ -179,7 +192,8 @@ fun ModelParametersSettingsScreen() {
             onAddParameter = { param ->
                 addCustomParameter(param)
                 showAddParameterDialog = false
-            }
+            },
+            providerType = currentProviderType
         )
     }
 
@@ -191,6 +205,39 @@ fun ModelParametersSettingsScreen() {
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 8.dp)
         )
+        
+        // Show provider type banner
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            )
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text(
+                        text = "当前LLM服务提供商: $providerType",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Text(
+                        text = "显示适用于${providerType}服务的模型参数",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    )
+                }
+            }
+        }
         
         Text(
             text = "启用参数时，该参数将被包含在API请求中。默认情况下，所有参数均处于关闭状态，使用模型的默认值。",
@@ -243,13 +290,35 @@ fun ModelParametersSettingsScreen() {
             }
         }
         
+        // Filter parameters based on provider type and show relevant ones
+        // For custom parameters, always show them regardless of provider
+        var filteredParams = parameters.filter { it.isCustom == true }
+        
+        // Add provider-specific parameters
+        when (currentProviderType) {
+            LLMProviderFactory.ProviderType.DEEPSEEK -> {
+                // For DeepSeek, show all standard parameters (that are not custom)
+                filteredParams = filteredParams + parameters.filter { !it.isCustom }
+            }
+            LLMProviderFactory.ProviderType.GEMINI -> {
+                // For Gemini, only show temperature, maxOutputTokens, and topP
+                filteredParams = filteredParams + parameters.filter { !it.isCustom && 
+                    (it.apiName == "temperature" || 
+                     it.apiName == "max_tokens" || 
+                     it.apiName == "top_p" ||
+                     // If there are Gemini-specific parameters, add them here
+                     it.apiName.startsWith("gemini_")) 
+                }
+            }
+        }
+
         // Group parameters by category
-        val generationParameters = parameters.filter { it.category == ParameterCategory.GENERATION }
-        val creativityParameters = parameters.filter { it.category == ParameterCategory.CREATIVITY }
-        val repetitionParameters = parameters.filter { it.category == ParameterCategory.REPETITION }
-        val advancedParameters = parameters.filter { it.category == ParameterCategory.ADVANCED }
+        val generationParameters = filteredParams.filter { it.category == ParameterCategory.GENERATION }
+        val creativityParameters = filteredParams.filter { it.category == ParameterCategory.CREATIVITY }
+        val repetitionParameters = filteredParams.filter { it.category == ParameterCategory.REPETITION }
+        val advancedParameters = filteredParams.filter { it.category == ParameterCategory.ADVANCED }
         // Custom parameters - any that are added by the user (Note: technically they could be in any category)
-        val customParameters = parameters.filter { it.isCustom == true }
+        val customParameters = filteredParams.filter { it.isCustom == true }
 
         // Validation errors map
         val parameterErrors = remember { mutableStateMapOf<String, String>() }
@@ -843,7 +912,8 @@ private fun TemperatureRecommendationRow() {
 @Composable
 fun AddParameterDialog(
     onDismiss: () -> Unit,
-    onAddParameter: (ModelParameter<*>) -> Unit
+    onAddParameter: (ModelParameter<*>) -> Unit,
+    providerType: LLMProviderFactory.ProviderType
 ) {
     var paramName by remember { mutableStateOf("") }
     var apiName by remember { mutableStateOf("") }
@@ -859,6 +929,18 @@ fun AddParameterDialog(
     var hasApiNameError by remember { mutableStateOf(false) }
     var hasValueError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    
+    // 为不同提供商准备提示信息和前缀
+    val providerInfo = when(providerType) {
+        LLMProviderFactory.ProviderType.DEEPSEEK -> Pair(
+            "添加DeepSeek API参数", 
+            ""
+        )
+        LLMProviderFactory.ProviderType.GEMINI -> Pair(
+            "添加Gemini API参数",
+            "gemini_"
+        )
+    }
     
     // 滚动状态
     val scrollState = rememberScrollState()
@@ -877,10 +959,40 @@ fun AddParameterDialog(
                     .verticalScroll(scrollState) // 添加滚动功能
             ) {
                 Text(
-                    text = "添加自定义参数",
+                    text = providerInfo.first,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
+                
+                // 添加提供商特定的说明
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = when (providerType) {
+                                LLMProviderFactory.ProviderType.DEEPSEEK -> 
+                                    "DeepSeek API支持多种自定义参数，请参考官方文档了解更多信息"
+                                LLMProviderFactory.ProviderType.GEMINI -> 
+                                    "Gemini API使用generationConfig对象包装参数，自定义参数将会添加gemini_前缀"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
                 
                 Spacer(modifier = Modifier.height(12.dp))
                 
@@ -906,7 +1018,13 @@ fun AddParameterDialog(
                         apiName = it 
                         hasApiNameError = it.isBlank()
                     },
-                    label = { Text("API参数名") },
+                    label = { 
+                        if (providerInfo.second.isNotEmpty()) {
+                            Text("API参数名 (自动添加前缀: ${providerInfo.second})")
+                        } else {
+                            Text("API参数名") 
+                        }
+                    },
                     isError = hasApiNameError,
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
@@ -1118,6 +1236,13 @@ fun AddParameterDialog(
                                 return@Button
                             }
                             
+                            // 添加提供商特定的前缀
+                            val finalApiName = if (providerInfo.second.isNotEmpty() && !apiName.startsWith(providerInfo.second)) {
+                                providerInfo.second + apiName
+                            } else {
+                                apiName
+                            }
+                            
                             // 创建参数对象
                             val parameter = try {
                                 when (selectedType) {
@@ -1126,9 +1251,9 @@ fun AddParameterDialog(
                                         val minVal = minValue.toIntOrNull()
                                         val maxVal = maxValue.toIntOrNull()
                                         ModelParameter(
-                                            id = apiName,
+                                            id = finalApiName,
                                             name = paramName,
-                                            apiName = apiName,
+                                            apiName = finalApiName,
                                             description = description,
                                             defaultValue = defVal,
                                             currentValue = defVal,
@@ -1136,6 +1261,7 @@ fun AddParameterDialog(
                                             valueType = ParameterValueType.INT,
                                             minValue = minVal,
                                             maxValue = maxVal,
+                                            icon = "settings",
                                             category = selectedCategory,
                                             isCustom = true
                                         )
@@ -1145,9 +1271,9 @@ fun AddParameterDialog(
                                         val minVal = minValue.toFloatOrNull()
                                         val maxVal = maxValue.toFloatOrNull()
                                         ModelParameter(
-                                            id = apiName,
+                                            id = finalApiName,
                                             name = paramName,
-                                            apiName = apiName,
+                                            apiName = finalApiName,
                                             description = description,
                                             defaultValue = defVal,
                                             currentValue = defVal,
@@ -1155,35 +1281,38 @@ fun AddParameterDialog(
                                             valueType = ParameterValueType.FLOAT,
                                             minValue = minVal,
                                             maxValue = maxVal,
+                                            icon = "settings",
                                             category = selectedCategory,
                                             isCustom = true
                                         )
                                     }
                                     ParameterValueType.STRING -> {
                                         ModelParameter(
-                                            id = apiName,
+                                            id = finalApiName,
                                             name = paramName,
-                                            apiName = apiName,
+                                            apiName = finalApiName,
                                             description = description,
                                             defaultValue = defaultValue,
                                             currentValue = defaultValue,
                                             isEnabled = true,
                                             valueType = ParameterValueType.STRING,
+                                            icon = "settings",
                                             category = selectedCategory,
                                             isCustom = true
                                         )
                                     }
                                     ParameterValueType.BOOLEAN -> {
-                                        val defVal = defaultValue.toBoolean()
+                                        val defVal = defaultValue.lowercase() == "true"
                                         ModelParameter(
-                                            id = apiName,
+                                            id = finalApiName,
                                             name = paramName,
-                                            apiName = apiName,
+                                            apiName = finalApiName,
                                             description = description,
                                             defaultValue = defVal,
                                             currentValue = defVal,
                                             isEnabled = true,
                                             valueType = ParameterValueType.BOOLEAN,
+                                            icon = "settings",
                                             category = selectedCategory,
                                             isCustom = true
                                         )
@@ -1195,12 +1324,12 @@ fun AddParameterDialog(
                                 return@Button
                             }
                             
-                            // 添加参数
-                            onAddParameter(parameter)
-                        },
-                        enabled = paramName.isNotBlank() && apiName.isNotBlank() && !hasValueError
+                            if (parameter != null) {
+                                onAddParameter(parameter)
+                            }
+                        }
                     ) {
-                        Text("添加")
+                        Text("添加参数")
                     }
                 }
             }

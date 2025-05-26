@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ai.assistance.operit.api.EnhancedAIService
+import com.ai.assistance.operit.api.LLMProviderFactory
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.data.model.AttachmentInfo
 import com.ai.assistance.operit.data.model.ChatHistory
@@ -77,6 +78,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     // Use lazy initialization for exposed properties to avoid circular reference issues
     // API配置相关
     val apiKey: StateFlow<String> by lazy { apiConfigDelegate.apiKey }
+    val apiProviderType: StateFlow<LLMProviderFactory.ProviderType> by lazy { apiConfigDelegate.apiProviderType }
     val apiEndpoint: StateFlow<String> by lazy { apiConfigDelegate.apiEndpoint }
     val modelName: StateFlow<String> by lazy { apiConfigDelegate.modelName }
     val isConfigured: StateFlow<Boolean> by lazy { apiConfigDelegate.isConfigured }

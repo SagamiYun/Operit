@@ -71,6 +71,9 @@ class ApiPreferences(private val context: Context) {
         const val DEFAULT_ENABLE_AI_PLANNING = false
         const val DEFAULT_AUTO_GRANT_ACCESSIBILITY = false
 
+        const val DEFAULT_GEMINI_API_ENDPOINT = "https://generativelanguage.googleapis.com/v1/models"
+        const val DEFAULT_GEMINI_MODEL_NAME = "gemini-1.5-pro"
+
         // Default values for custom prompts
         const val DEFAULT_INTRO_PROMPT = "你是Operit，一个全能AI助手，旨在解决用户提出的任何任务。你有各种工具可以调用，以高效完成复杂的请求。"
         const val DEFAULT_TONE_PROMPT = "保持有帮助的语气，并清楚地传达限制。使用问题库根据用户的风格、偏好和过去的信息个性化响应。"
@@ -92,6 +95,12 @@ class ApiPreferences(private val context: Context) {
 
         // 默认空的自定义参数列表
         const val DEFAULT_CUSTOM_PARAMETERS = "[]"
+
+        // Add provider type preference key
+        val PROVIDER_TYPE = stringPreferencesKey("provider_type")
+        
+        // Default provider is DeepSeek
+        const val DEFAULT_PROVIDER_TYPE = "DEEPSEEK"
     }
 
     // Get API Key as Flow
@@ -230,6 +239,12 @@ class ApiPreferences(private val context: Context) {
             context.apiDataStore.data.map { preferences ->
                 preferences[CUSTOM_TONE_PROMPT] ?: DEFAULT_TONE_PROMPT
             }
+
+    // Add provider type flow
+    val providerTypeFlow: Flow<String> = 
+        context.apiDataStore.data.map { preferences ->
+            preferences[PROVIDER_TYPE] ?: DEFAULT_PROVIDER_TYPE
+        }
 
     // Save API Key
     suspend fun saveApiKey(apiKey: String) {
@@ -767,6 +782,13 @@ class ApiPreferences(private val context: Context) {
         context.apiDataStore.edit { preferences ->
             preferences[PREFERENCE_ANALYSIS_INPUT_TOKENS] = 0
             preferences[PREFERENCE_ANALYSIS_OUTPUT_TOKENS] = 0
+        }
+    }
+
+    // Add a method to save provider type
+    suspend fun saveProviderType(providerType: String) {
+        context.apiDataStore.edit { preferences -> 
+            preferences[PROVIDER_TYPE] = providerType 
         }
     }
 }

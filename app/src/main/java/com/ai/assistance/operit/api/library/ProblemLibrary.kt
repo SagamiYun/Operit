@@ -2,7 +2,7 @@ package com.ai.assistance.operit.api.library
 
 import android.content.Context
 import android.util.Log
-import com.ai.assistance.operit.api.AIService
+import com.ai.assistance.operit.api.LLMProvider
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.data.preferences.ApiPreferences
 import com.ai.assistance.operit.data.preferences.preferencesManager
@@ -77,7 +77,7 @@ object ProblemLibrary {
             toolHandler: AIToolHandler,
             conversationHistory: List<Pair<String, String>>,
             content: String,
-            aiService: AIService
+            aiService: LLMProvider
     ) {
         ensureInitialized(context)
 
@@ -106,7 +106,7 @@ object ProblemLibrary {
             toolHandler: AIToolHandler,
             conversationHistory: List<Pair<String, String>>,
             content: String,
-            aiService: AIService
+            aiService: LLMProvider
     ) {
         // 检查会话历史是否为空
         if (conversationHistory.isEmpty()) {
@@ -175,7 +175,7 @@ object ProblemLibrary {
 
     /** 生成分析结果 */
     private suspend fun generateAnalysis(
-            aiService: AIService,
+            aiService: LLMProvider,
             query: String,
             solution: String,
             conversationHistory: List<Pair<String, String>>
@@ -311,7 +311,7 @@ object ProblemLibrary {
                     jsonString.trim().let {
                         val startIndex = it.indexOf("{")
                         val endIndex = it.lastIndexOf("}")
-                        if (startIndex >= 0 && endIndex > startIndex) {
+                        if (startIndex in 0..<endIndex) {
                             it.substring(startIndex, endIndex + 1)
                         } else {
                             it

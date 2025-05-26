@@ -947,7 +947,7 @@ public data class EmbeddedResource(
 @Suppress("EnumEntryName")
 @Serializable
 public enum class Role {
-    user, assistant,
+    user, assistant, system,
 }
 
 /**
