@@ -196,12 +196,12 @@ class GeminiService(
             
         // Convert filtered history to Gemini Content format
         for ((role, text) in filteredHistory) {
-            // 特殊处理工具结果消息 - 这是关键部分
+            // 特殊处理工具结果消息 - 保持XML格式完整
             if (role == "tool" && text.contains("<tool_result>")) {
                 Log.d(TAG, "处理工具结果消息: ${text.take(100)}...")
                 
-                // 创建特殊的工具结果内容，作为用户消息
-                // 保持原始格式，确保EnhancedAIService可以正确识别
+                // 以用户消息的形式传递完整的工具结果XML
+                // 这样Gemini可以看到完整的XML结构，而不会丢失信息
                 val content = Content(Role.user.toString(), listOf(TextPart(text)))
                 contents.add(content)
                 
@@ -214,23 +214,16 @@ class GeminiService(
             val geminiRole = when (role) {
                 "user" -> Role.user
                 "assistant" -> Role.assistant
-                "system" -> Role.system // Handle system role specially
-                "tool" -> Role.user // 默认将其他工具消息也映射为用户角色
-                else -> Role.user // Default to user
+                "system" -> Role.system 
+                "tool" -> Role.user // 工具消息映射为用户角色
+                else -> Role.user // 默认为用户
             }
             
-            // Create Content based on role
-            val content = if (role == "system") {
-                // For system role, prepend with special instruction marker
-                Content(geminiRole.toString(), listOf(TextPart("System instruction: $text")))
-            } else {
-                // For normal roles, create regular content
-                Content(geminiRole.toString(), listOf(TextPart(text)))
-            }
-            
+            // 创建消息内容，保留原始格式
+            val content = Content(geminiRole.toString(), listOf(TextPart(text)))
             contents.add(content)
             
-            // Count input tokens
+            // 计算输入tokens
             _inputTokenCount += estimateTokenCount(text)
         }
         
@@ -378,32 +371,19 @@ class GeminiService(
     private fun buildPromptFromContents(contents: List<Content>): String {
         val prompt = StringBuilder()
         
-        // 添加一些背景信息以帮助Gemini理解上下文
+        // 添加简短的系统说明，指导Gemini识别和使用XML标签
         prompt.append("""
-            系统指令: 你是一个支持结构化规划的AI助手。当需要执行复杂任务时，使用<plan_item>标签创建和跟踪计划项。
-            你能够使用各种XML标签来增强交互，包括工具调用、思考过程显示、状态反馈和计划管理。
-            请仔细阅读用户输入，并根据需要使用适当的标签格式回应。
-            
+            系统指令: 你是一个支持工具调用的AI助手。使用<tool_call>标签调用工具，处理<tool_result>标签中的工具执行结果。
+            请保持XML标签的完整性。
         """.trimIndent())
         prompt.append("\n\n")
         
+        // 直接添加所有消息内容，保持XML标记完整
         for (content in contents) {
             val role = content.role
             val text = content.parts.filterIsInstance<TextPart>().joinToString("") { it.text }
             
-            // 检测工具结果并做特殊处理 - 提取更简洁的格式
-            if (text.contains("<tool_result>")) {
-                val simplifiedResult = simplifyToolResult(text)
-                prompt.append("User (with tool result): $simplifiedResult\n\n")
-                continue
-            }
-            
-            // 检测并处理工具调用结果
-            if (processToolResult(text, prompt)) {
-                // 如果是工具结果，已在processToolResult中处理
-                continue
-            }
-            
+            // 简单映射角色，保留原始消息内容
             when (role) {
                 Role.user.toString() -> prompt.append("User: $text\n\n")
                 Role.assistant.toString() -> prompt.append("Assistant: $text\n\n")
@@ -412,114 +392,17 @@ class GeminiService(
             }
         }
         
-        // 提示模型使用所有支持的标签和格式
-        prompt.append("""
-            你是一个强大的AI助手，可以使用各种标签来增强交互体验。请根据需要使用以下标签格式：
-
-            1. 工具调用标签（用于执行特定功能）：
-               - 简化格式（推荐）：
-                 <toolname="工具名称">参数值
-                 例如：<toolname="list_files">/sdcard/
-                 例如：<toolname="read_file">/sdcard/example.txt
-                 例如：<toolname="calculate">2 + 2 * 3
-               
-               - 完整XML格式：
-                 <tool name="工具名称">
-                   <param name="参数名">参数值</param>
-                 </tool>
-            
-            2. 思考内容标签（用于展示你的思考过程）：
-               <think>
-               这里是你的详细思考过程，用户不会直接看到这部分内容
-               可以包含多行分析、推理和计算过程
-               </think>
-               这里是你给用户看到的最终回答
-            
-            3. 状态标签（用于指示交互状态）：
-               - 等待用户提供信息：
-                 <status type="wait_for_user_need">我需要更多信息才能继续</status>
-               
-               - 执行工具时：
-                 <status type="executing_tool" tool="工具名称">正在执行工具...</status>
-               
-               - 错误状态：
-                 <status type="error" title="错误标题" subtitle="错误子标题">错误详细信息</status>
-            
-            4. 计划项标签（用于展示执行计划）：
-               - 创建计划项：
-                 <plan_item id="1" status="pending">查找相关文件</plan_item>
-                 <plan_item id="2" status="pending">分析文件内容</plan_item>
-               
-               - 更新计划项状态：
-                 <plan_update id="1" status="completed"/>
-                 <plan_update id="2" status="in_progress"/>
-            
-            请根据上下文和需要，选择合适的标签格式。当你收到带有<tool_result>标签的内容时，这表示工具执行的结果，你应该基于这些结果回答问题。
-        """.trimIndent())
-        
         return prompt.toString().trim()
     }
     
-    // 简化工具结果格式，提取最关键信息
-    private fun simplifyToolResult(text: String): String {
-        // 正则表达式匹配工具结果内容
-        val toolResultPattern = "<tool_result\\s+name=\"([^\"]+)\"\\s+status=\"([^\"]+)\">\\s*<content>\\s*(.*?)\\s*</content>\\s*</tool_result>".toRegex(RegexOption.DOT_MATCHES_ALL)
-        val match = toolResultPattern.find(text)
-        
-        if (match != null) {
-            val toolName = match.groupValues[1]
-            val status = match.groupValues[2]
-            val content = match.groupValues[3].trim()
-            
-            Log.d(TAG, "提取工具结果 - 工具: $toolName, 状态: $status")
-            
-            // 构建更简洁的格式
-            return "我已使用工具 '$toolName' 获取到以下结果:\n$content"
-        }
-        
-        // 如果无法解析，返回原始文本
-        return text
-    }
-    
-    // 处理工具调用结果
-    private fun processToolResult(text: String, promptBuilder: StringBuilder): Boolean {
-        // 检查是否包含工具调用结果标记
-        if (text.contains("<tool_result>")) {
-            Log.d(TAG, "在prompt构建中识别到工具结果，保持原始格式")
-            
-            // 直接添加原始文本，保留<tool_result>标签
-            // 这确保与EnhancedAIService的处理方式一致
-            promptBuilder.append(text)
-            promptBuilder.append("\n\n")
-            return true
-        }
-        
-        // 检查是否是工具调用请求
-        val toolCallPattern = "(\\w+_\\w+):\\s*(.+)".toRegex()
-        val toolCallMatch = toolCallPattern.find(text)
-        
-        if (toolCallMatch != null && (text.contains("fetch_web_page") || text.contains("search_web"))) {
-            val toolName = toolCallMatch.groupValues[1]
-            val toolArgs = toolCallMatch.groupValues[2]
-            
-            // 工具调用请求也保持简单格式
-            promptBuilder.append(text)
-            promptBuilder.append("\n\n")
-            return true
-        }
-        
-        return false
-    }
-    
-    // 特殊处理包含工具结果的消息
+    // 更直接地处理包含工具调用或结果的消息，尊重原始XML格式
     @OptIn(ExperimentalSerializationApi::class)
-    private fun handleMessageWithToolResults(message: String, historyContents: List<Content>): Content {
-        // 检查消息是否包含工具结果
-        if (message.contains("<tool_result>")) {
-            Log.d(TAG, "检测到包含工具结果的消息，直接传递原始格式")
+    private fun handleMessageWithToolResults(message: String): Content {
+        // 检查消息是否包含工具结果或工具调用，保持原始XML结构
+        if (message.contains("<tool_result>") || message.contains("<tool_call>")) {
+            Log.d(TAG, "检测到包含工具结果或调用的消息，保留完整XML格式")
             
-            // 直接传递原始消息，保持<tool_result>标签的完整性
-            // 这样EnhancedAIService可以正确处理工具调用结果
+            // 直接传递原始XML格式，保持标签的完整性
             _inputTokenCount += estimateTokenCount(message)
             return Content(Role.user.toString(), listOf(TextPart(message)))
         }
@@ -549,36 +432,23 @@ class GeminiService(
         
         onConnectionStatus?.invoke("Preparing to connect to Gemini API...")
         
-        // 检查是否包含工具结果消息
-        val hasToolResult = chatHistory.any { (role, content) -> 
-            role == "tool" && content.contains("<tool_result>") 
-        }
-        if (hasToolResult) {
-            Log.d(TAG, "检测到历史中包含工具结果消息，总共 ${chatHistory.size} 条历史消息")
-            chatHistory.forEachIndexed { index, (role, content) ->
-                if (role == "tool" && content.contains("<tool_result>")) {
-                    Log.d(TAG, "历史消息 #$index - 工具结果: ${content.take(100)}...")
-                }
-            }
-        }
-        
-        // Standardize chat history roles
+        // 标准化聊天历史角色
         val standardizedHistory = ChatUtils.mapChatHistoryToStandardRoles(chatHistory)
         
-        // Convert to Gemini Content format
+        // 转换为Gemini内容格式
         val historyContents = convertChatHistory(standardizedHistory)
         
-        // Create user message Content - 特殊处理可能包含工具结果的消息
-        val userContent = handleMessageWithToolResults(message, historyContents)
+        // 创建用户消息内容 - 使用简化的处理方式，保留XML格式
+        val userContent = handleMessageWithToolResults(message)
         
         while (retryCount < maxRetries && !isCancelled) {
             try {
-                // Create GenerativeModel with parameters
+                // 创建带参数的GenerativeModel
                 val model = createGenerativeModel(modelParameters)
                 
                 onConnectionStatus?.invoke("Establishing connection...")
                 
-                // Prepare all contents for the chat
+                // 准备聊天的所有内容
                 val allContents = historyContents + userContent
                 this@GeminiService.chatHistory = allContents.toMutableList()
                 
@@ -589,23 +459,17 @@ class GeminiService(
                     Log.d(TAG, "消息 #$index - 角色: ${content.role}, 内容: ${text.take(100)}...")
                 }
                 
-                // Start streaming generation
-                    onConnectionStatus?.invoke("Connection successful, waiting for response...")
+                // 开始流式生成
+                onConnectionStatus?.invoke("Connection successful, waiting for response...")
                 
-                // Process the content stream with better error handling
+                // 处理内容流，提高错误处理能力
                 val finalResponse = processContentStream(model, allContents, onPartialResponse)
                 
-                // Only call completion if not cancelled
+                // 仅在未取消时调用完成回调
                 if (!isCancelled) {
                     Log.d(TAG, "Processing complete, calling completion callback")
                     
-                    // 检查响应是否是工具调用请求
-                    if (finalResponse.contains("fetch_web_page:") || 
-                        finalResponse.contains("search_web:")) {
-                        Log.d(TAG, "检测到工具调用请求: $finalResponse")
-                    }
-                    
-                    // Add the model response to chat history for future calls
+                    // 添加模型响应到聊天历史，以备将来调用
                     val modelResponse = Content(Role.assistant.toString(), listOf(TextPart(finalResponse)))
                     this@GeminiService.chatHistory.add(modelResponse)
                     
@@ -614,7 +478,7 @@ class GeminiService(
                     Log.d(TAG, "Stream was cancelled, skipping completion callback")
                 }
                 
-                // Successful completion
+                // 成功完成
                 return@withContext
                 
             } catch (e: SocketTimeoutException) {
@@ -622,7 +486,7 @@ class GeminiService(
                 retryCount++
                 onConnectionStatus?.invoke("Connection timeout, retrying (${retryCount})...")
                 onPartialResponse("", "Connection timeout, retry attempt ${retryCount}...")
-                // Exponential backoff
+                // 指数退避
                 delay(1000L * retryCount)
             } catch (e: UnknownHostException) {
                 onConnectionStatus?.invoke("Could not connect to server, check network")
