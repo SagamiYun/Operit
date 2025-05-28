@@ -1,8 +1,15 @@
 package com.ai.assistance.operit.ui.features.chat.components
 
+import android.util.Log
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -15,15 +22,18 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
@@ -55,7 +65,9 @@ fun ChatInputSection(
         hasBackgroundImage: Boolean = false,
         modifier: Modifier = Modifier,
         externalAttachmentPanelState: Boolean? = null,
-        onAttachmentPanelStateChange: ((Boolean) -> Unit)? = null
+        onAttachmentPanelStateChange: ((Boolean) -> Unit)? = null,
+        onVoiceRecognitionRequest: () -> Unit = {},
+        isListening: Boolean = false
 ) {
         val modernTextStyle = TextStyle(fontSize = 13.sp, lineHeight = 16.sp)
 
@@ -198,7 +210,91 @@ fun ChatInputSection(
                                         enabled = !isProcessing || allowTextInputWhileProcessing
                                 )
 
-                                Spacer(modifier = Modifier.width(12.dp))
+                                // Spacing between text field and buttons
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                // Voice recognition button
+                                val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (isListening) 
+                                                MaterialTheme.colorScheme.primary
+                                            else 
+                                                MaterialTheme.colorScheme.primaryContainer,
+                                            CircleShape
+                                        )
+                                        .clickable(
+                                            enabled = !isProcessing,
+                                            onClick = { 
+                                                Log.d("ChatInputSection", "语音按钮被点击，当前isListening: $isListening") 
+                                                // 清除焦点，避免键盘干扰
+                                                focusManager.clearFocus()
+                                                
+                                                // 调用语音识别回调
+                                                onVoiceRecognitionRequest()
+                                            }
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    // Remember the previous listening state to animate transitions
+                                    val previousListening = remember { mutableStateOf(isListening) }
+                                    val animatedColor by animateColorAsState(
+                                        targetValue = if (isListening) 
+                                                       MaterialTheme.colorScheme.onPrimary
+                                                     else 
+                                                       MaterialTheme.colorScheme.onPrimaryContainer,
+                                        animationSpec = tween(300),
+                                        label = "micIconColor"
+                                    )
+                                    
+                                    // Detect state changes for additional feedback
+                                    LaunchedEffect(isListening) {
+                                        if (previousListening.value && !isListening) {
+                                            // Transitioning from listening to not listening
+                                            // Could add haptic feedback here if desired
+                                        }
+                                        previousListening.value = isListening
+                                    }
+                                    
+                                    Icon(
+                                        imageVector = Icons.Default.Mic,
+                                        contentDescription = if (isListening) "停止语音输入" else "语音输入",
+                                        tint = animatedColor
+                                    )
+                                    
+                                    // Add pulsing animation when listening
+                                    if (isListening) {
+                                        val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(
+                                            label = "micPulse"
+                                        )
+                                        val scale by infiniteTransition.animateFloat(
+                                            initialValue = 1f,
+                                            targetValue = 1.2f,
+                                            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                                                animation = androidx.compose.animation.core.tween(700),
+                                                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+                                            ),
+                                            label = "pulseAnimation"
+                                        )
+                                        
+                                        Box(
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .scale(scale)
+                                                .border(
+                                                    width = 2.dp,
+                                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                                    shape = CircleShape
+                                                )
+                                        )
+                                    }
+                                }
+
+                                // Spacing between buttons
+                                Spacer(modifier = Modifier.width(8.dp))
 
                                 // Attachment button (+ 按钮) - 确保圆形
                                 Box(

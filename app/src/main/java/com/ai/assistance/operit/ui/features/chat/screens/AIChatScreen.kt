@@ -101,6 +101,8 @@ fun AIChatScreen(
         val attachments by actualViewModel.attachments.collectAsState()
         // 收集附件面板状态
         val attachmentPanelState by actualViewModel.attachmentPanelState.collectAsState()
+        // 收集语音识别状态
+        val isListening by actualViewModel.isListening.collectAsState()
 
         // Floating window mode state
         val isFloatingMode by actualViewModel.isFloatingMode.collectAsState()
@@ -575,7 +577,16 @@ fun AIChatScreen(
                                                         actualViewModel.updateAttachmentPanelState(
                                                                 newState
                                                         )
-                                                }
+                                                },
+                                                // 连接语音识别功能
+                                                onVoiceRecognitionRequest = {
+                                                    if (isListening) {
+                                                        actualViewModel.stopVoiceRecognition()
+                                                    } else {
+                                                        actualViewModel.startVoiceRecognition()
+                                                    }
+                                                },
+                                                isListening = isListening
                                         )
                                 }
                         }

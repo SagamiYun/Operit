@@ -15,6 +15,10 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" />
     
+    <!-- Voice interaction permissions -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    
     <!-- Termux permissions -->
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
     
@@ -119,6 +123,13 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync|specialUse" />
+            
+        <!-- Voice Interaction Service -->
+        <service
+            android:name=".services.voice.VoiceInteractionService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <!-- 无障碍服务 -->
         <!-- <service

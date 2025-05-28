@@ -18,6 +18,16 @@ import com.ai.assistance.operit.ui.permissions.ToolPermissionSystem
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import com.ai.assistance.operit.core.voice.recognition.SpeechRecognitionService
+import com.ai.assistance.operit.core.voice.recognition.AndroidSpeechRecognitionService
+import com.ai.assistance.operit.core.voice.recognition.SpeechRecognitionResult
+import android.speech.SpeechRecognizer
+import android.Manifest
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.util.*
 
 class ChatViewModel(private val context: Context) : ViewModel() {
 
@@ -130,6 +140,15 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     // 添加一个用于跟踪附件面板状态的变量
     private val _attachmentPanelState = MutableStateFlow(false)
     val attachmentPanelState: StateFlow<Boolean> = _attachmentPanelState
+    
+    // 语音识别相关
+    private var speechRecognitionService: SpeechRecognitionService? = null
+    private val _isListening = MutableStateFlow(false)
+    val isListening: StateFlow<Boolean> = _isListening
+    
+    // 语音识别语言设置
+    private val _currentVoiceLanguage = MutableStateFlow("")
+    val currentVoiceLanguage: StateFlow<String> = _currentVoiceLanguage
 
     init {
         // Initialize delegates in correct order to avoid circular references
@@ -139,6 +158,9 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         setupPermissionSystemCollection()
         setupAttachmentManagerToastCollection()
         checkIfShouldCreateNewChat()
+        
+        // Initialize speech recognition service
+        initializeSpeechRecognition()
     }
 
     private fun initializeDelegates() {
@@ -782,9 +804,299 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         _attachmentPanelState.value = isOpen
     }
 
+    /** 初始化语音识别服务 */
+    private fun initializeSpeechRecognition() {
+        viewModelScope.launch {
+            try {
+                // 创建服务
+                speechRecognitionService = AndroidSpeechRecognitionService(context)
+                
+                // 设置语音识别的默认语言
+                val defaultLanguage = getSystemLanguage()
+                setVoiceRecognitionLanguage(defaultLanguage)
+                
+                // 初始化服务
+                if (speechRecognitionService?.initialize() == true) {
+                    Log.d(TAG, "语音识别服务初始化成功")
+                    
+                    // 设置结果收集器
+                    setupSpeechRecognitionCollector()
+                } else {
+                    Log.d(TAG, "语音识别服务初始化失败")
+                    uiStateDelegate.showToast("语音识别服务初始化失败，请检查权限设置")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "初始化语音识别服务时出错", e)
+                uiStateDelegate.showToast("初始化语音识别服务失败: ${e.message}")
+            }
+        }
+    }
+    
+    /** 
+     * 从系统设置中获取当前语言 
+     * @return 语言代码，例如 "zh-CN"
+     */
+    private fun getSystemLanguage(): String {
+        val locale = Locale.getDefault()
+        val language = locale.language
+        val country = locale.country
+        
+        // 构建语言代码
+        return if (country.isNotBlank()) {
+            "$language-$country"
+        } else {
+            // 对于一些常见语言，提供默认国家代码
+            when (language) {
+                "zh" -> "zh-CN" // 中文默认使用简体中文
+                "en" -> "en-US" // 英语默认使用美国英语
+                else -> language
+            }
+        }
+    }
+    
+    /**
+     * 设置语音识别使用的语言
+     * @param languageCode 语言代码，例如 "zh-CN", "en-US" 等
+     */
+    fun setVoiceRecognitionLanguage(languageCode: String) {
+        if (languageCode.isNotBlank()) {
+            _currentVoiceLanguage.value = languageCode
+            speechRecognitionService?.setLanguage(languageCode)
+            uiStateDelegate.showToast("语音识别语言已设置为: $languageCode")
+            Log.d(TAG, "语音识别语言已设置为: $languageCode")
+        }
+    }
+    
+    /** 设置语音识别结果收集器 */
+    private fun setupSpeechRecognitionCollector() {
+        speechRecognitionService?.let { service ->
+            // 收集部分识别结果 - 实时更新用户输入框
+            viewModelScope.launch {
+                Log.d(TAG, "开始监听语音识别部分结果")
+                try {
+                    service.getPartialResultsFlow().collect { partialText ->
+                        // 防止收集到空的部分结果
+                        if (partialText.isBlank()) {
+                            Log.d(TAG, "收到空的语音识别部分结果，忽略")
+                            return@collect
+                        }
+                        
+                        Log.d(TAG, "收到语音识别部分结果: '$partialText'")
+                        // 只有当前正在监听时，才更新部分结果
+                        if (_isListening.value) {
+                            // 在主线程中更新用户消息
+                            withContext(Dispatchers.Main) {
+                                // 更新用户消息，显示实时识别结果
+                                messageProcessingDelegate.updateUserMessage(partialText)
+                            }
+                        } else {
+                            Log.d(TAG, "忽略部分结果，当前未处于监听状态")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "处理部分语音识别结果时出错", e)
+                }
+            }
+            
+            // 收集最终识别结果
+            viewModelScope.launch {
+                Log.d(TAG, "开始监听语音识别最终结果")
+                try {
+                    service.getFinalResultsFlow().collect { result ->
+                        try {
+                            Log.d(TAG, "收到最终语音识别结果: $result (是否有错误: ${result.error != null})")
+                            
+                            // 无论如何都停止监听状态，避免卡在监听状态
+                            val wasListening = _isListening.value
+                            _isListening.value = false
+                            
+                            if (result.error == null) {
+                                // 识别成功，确保文本不为空
+                                if (result.text.isNotBlank()) {
+                                    Log.d(TAG, "收到有效的语音识别最终结果: '${result.text}', 信心度: ${result.confidence}")
+                                    
+                                    withContext(Dispatchers.Main) {
+                                        try {
+                                            // 获取当前输入框内容
+                                            val currentText = messageProcessingDelegate.userMessage.value.trim()
+                                            Log.d(TAG, "当前输入框内容: '$currentText'")
+                                            
+                                            // 确定如何组合新的识别结果
+                                            val newText = when {
+                                                // 如果当前没有文本，直接使用识别结果
+                                                currentText.isEmpty() -> result.text
+                                                
+                                                // 如果当前文本已经包含识别结果(部分识别已经更新过)，则不重复添加
+                                                currentText == result.text -> currentText
+                                                
+                                                // 如果当前文本是识别结果的一部分，则使用完整结果
+                                                result.text.contains(currentText) -> result.text
+                                                
+                                                // 否则将新识别结果附加到当前文本后面
+                                                else -> "$currentText ${result.text}"
+                                            }
+                                            
+                                            Log.d(TAG, "准备更新输入框内容为: '$newText'")
+                                            
+                                            // 直接在主线程更新用户消息
+                                            messageProcessingDelegate.updateUserMessage(newText)
+                                            Log.d(TAG, "成功更新输入框内容")
+                                            
+                                            // 显示成功提示
+                                            uiStateDelegate.showToast("语音识别成功: ${result.text}")
+                                        } catch (e: Exception) {
+                                            Log.e(TAG, "更新输入框内容时出错", e)
+                                        }
+                                    }
+                                } else {
+                                    // 文本为空但没有错误，可能是静音
+                                    Log.w(TAG, "语音识别成功但结果为空")
+                                    uiStateDelegate.showToast("没有识别到语音内容，请重试")
+                                }
+                            } else {
+                                // 识别出错
+                                Log.e(TAG, "语音识别错误: ${result.error.message} (Code: ${result.error.code})")
+                                if (result.error.code != SpeechRecognizer.ERROR_NO_MATCH) {
+                                    // 对于非"没有匹配"的错误显示提示
+                                    uiStateDelegate.showToast("语音识别错误: ${result.error.message}")
+                                } else {
+                                    // 对于NO_MATCH错误也显示一个友好提示
+                                    Log.d(TAG, "语音识别无匹配结果")
+                                    uiStateDelegate.showToast("未能识别您的语音，请重试")
+                                }
+                            }
+                            
+                            // 通知服务停止监听，确保资源释放
+                            if (wasListening) {
+                                service.stopListening()
+                                Log.d(TAG, "语音识别过程完成，停止监听")
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "处理语音识别结果时出错", e)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "监听语音识别结果流时出错", e)
+                }
+            }
+            
+            // 监听服务的听取状态，确保UI状态与服务状态同步
+            viewModelScope.launch {
+                Log.d(TAG, "开始监听语音识别状态变化")
+                service.getListeningStateFlow().collect { isServiceListening ->
+                    Log.d(TAG, "语音识别状态更新: $isServiceListening")
+                    _isListening.value = isServiceListening
+                }
+            }
+        } ?: run {
+            Log.e(TAG, "语音识别服务为空，无法设置结果收集器")
+        }
+    }
+    
+    /** 请求开始语音识别 */
+    fun startVoiceRecognition() {
+        viewModelScope.launch {
+            try {
+                // 检查音频录制权限
+                val hasPermission = ContextCompat.checkSelfPermission(
+                    context, 
+                    Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+                
+                if (!hasPermission) {
+                    Log.d(TAG, "缺少RECORD_AUDIO权限，语音识别无法工作")
+                    uiStateDelegate.showToast("需要麦克风权限才能使用语音识别功能")
+                    return@launch
+                }
+                
+                // 确保服务已初始化
+                if (speechRecognitionService == null) {
+                    Log.d(TAG, "语音识别服务为空，正在初始化...")
+                    initializeSpeechRecognition()
+                }
+                
+                // 避免在已经在监听时重复启动
+                if (_isListening.value) {
+                    Log.d(TAG, "语音识别已经在进行中，忽略重复启动请求")
+                    return@launch
+                }
+                
+                // 如果当前语言未设置，则使用系统语言
+                if (_currentVoiceLanguage.value.isBlank()) {
+                    setVoiceRecognitionLanguage(getSystemLanguage())
+                }
+                
+                // 开始语音识别之前显示状态
+                messageProcessingDelegate.setInputProcessingState(true, "正在启动语音识别...")
+                
+                // 启动语音识别
+                Log.d(TAG, "请求开始语音识别，使用语言: ${_currentVoiceLanguage.value}")
+                val success = speechRecognitionService?.startListening(false) ?: false
+                
+                if (success) {
+                    // 我们现在依赖于从service的状态流来更新_isListening
+                    Log.d(TAG, "语音识别请求成功启动")
+                    uiStateDelegate.showToast("请开始说话...")
+                } else {
+                    Log.d(TAG, "语音识别启动失败")
+                    uiStateDelegate.showToast("无法启动语音识别")
+                }
+                
+                // 语音识别启动后不再显示处理状态
+                messageProcessingDelegate.setInputProcessingState(false, "")
+            } catch (e: Exception) {
+                Log.e(TAG, "启动语音识别时出错", e)
+                uiStateDelegate.showToast("启动语音识别失败: ${e.message}")
+                messageProcessingDelegate.setInputProcessingState(false, "")
+            }
+        }
+    }
+    
+    /** 停止语音识别 */
+    fun stopVoiceRecognition() {
+        Log.d(TAG, "停止语音识别，当前状态: ${_isListening.value}")
+        
+        // 无论当前状态如何，都强制设置为 false，确保 UI 立即响应
+        _isListening.value = false
+        
+        viewModelScope.launch {
+            try {
+                if (speechRecognitionService != null) {
+                    val stopped = speechRecognitionService?.stopListening() ?: false
+                    Log.d(TAG, "语音识别停止请求结果: $stopped")
+                    
+                    // 对于某些设备，可能需要强制关闭和重建语音识别器
+                    if (!stopped) {
+                        Log.d(TAG, "停止语音识别失败，尝试关闭并重建语音识别器")
+                        speechRecognitionService?.shutdown()
+                        speechRecognitionService = null
+                        initializeSpeechRecognition() // 重新初始化以备下次使用
+                    }
+                } else {
+                    Log.d(TAG, "speechRecognitionService 为空，无法停止")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "停止语音识别时出错", e)
+                
+                // 发生错误时，清理并重建语音识别器
+                try {
+                    speechRecognitionService?.shutdown()
+                    speechRecognitionService = null
+                    initializeSpeechRecognition() // 重新初始化以备下次使用
+                } catch (inner: Exception) {
+                    Log.e(TAG, "清理语音识别服务时出错", inner)
+                }
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         // 清理悬浮窗资源
         floatingWindowDelegate.cleanup()
+        
+        // 清理语音识别资源
+        speechRecognitionService?.shutdown()
+        speechRecognitionService = null
     }
 }
