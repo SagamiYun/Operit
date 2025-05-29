@@ -82,7 +82,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
 
     // Break circular dependency with lateinit
     private lateinit var chatHistoryDelegate: ChatHistoryDelegate
-    private lateinit var messageProcessingDelegate: MessageProcessingDelegate
+    lateinit var messageProcessingDelegate: MessageProcessingDelegate
     private lateinit var floatingWindowDelegate: FloatingWindowDelegate
 
     // Use lazy initialization for exposed properties to avoid circular reference issues
@@ -847,8 +847,9 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         } else {
             // 对于一些常见语言，提供默认国家代码
             when (language) {
-                "zh" -> "zh-CN" // 中文默认使用简体中文
-                "en" -> "en-US" // 英语默认使用美国英语
+                "zh" -> "zh-CN"
+                "en" -> "en-US"
+                "jp" -> "ja-JP"
                 else -> language
             }
         }
@@ -900,83 +901,64 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             
             // 收集最终识别结果
             viewModelScope.launch {
-                Log.d(TAG, "开始监听语音识别最终结果")
-                try {
-                    service.getFinalResultsFlow().collect { result ->
-                        try {
-                            Log.d(TAG, "收到最终语音识别结果: $result (是否有错误: ${result.error != null})")
-                            
-                            // 无论如何都停止监听状态，避免卡在监听状态
-                            val wasListening = _isListening.value
-                            _isListening.value = false
-                            
-                            if (result.error == null) {
-                                // 识别成功，确保文本不为空
-                                if (result.text.isNotBlank()) {
-                                    Log.d(TAG, "收到有效的语音识别最终结果: '${result.text}', 信心度: ${result.confidence}")
-                                    
-                                    withContext(Dispatchers.Main) {
-                                        try {
-                                            // 获取当前输入框内容
-                                            val currentText = messageProcessingDelegate.userMessage.value.trim()
-                                            Log.d(TAG, "当前输入框内容: '$currentText'")
-                                            
-                                            // 确定如何组合新的识别结果
-                                            val newText = when {
-                                                // 如果当前没有文本，直接使用识别结果
-                                                currentText.isEmpty() -> result.text
-                                                
-                                                // 如果当前文本已经包含识别结果(部分识别已经更新过)，则不重复添加
-                                                currentText == result.text -> currentText
-                                                
-                                                // 如果当前文本是识别结果的一部分，则使用完整结果
-                                                result.text.contains(currentText) -> result.text
-                                                
-                                                // 否则将新识别结果附加到当前文本后面
-                                                else -> "$currentText ${result.text}"
-                                            }
-                                            
-                                            Log.d(TAG, "准备更新输入框内容为: '$newText'")
-                                            
-                                            // 直接在主线程更新用户消息
-                                            messageProcessingDelegate.updateUserMessage(newText)
-                                            Log.d(TAG, "成功更新输入框内容")
-                                            
-                                            // 显示成功提示
-                                            uiStateDelegate.showToast("语音识别成功: ${result.text}")
-                                        } catch (e: Exception) {
-                                            Log.e(TAG, "更新输入框内容时出错", e)
-                                        }
-                                    }
-                                } else {
-                                    // 文本为空但没有错误，可能是静音
-                                    Log.w(TAG, "语音识别成功但结果为空")
-                                    uiStateDelegate.showToast("没有识别到语音内容，请重试")
+                Log.d(TAG, "开始监听语音")
+                service.getFinalResultsFlow().collect { result ->
+                    Log.d(TAG, "收到最终语音识别结果: $result (是否有错误: ${result.error != null})")
+
+                    // 无论如何都停止监听状态，避免卡在监听状态
+                    val wasListening = _isListening.value
+                    _isListening.value = false
+
+                    if (result.error == null) {
+                        // 识别成功，确保文本不为空
+                        if (result.text.isNotBlank()) {
+                            Log.d(TAG, "收到有效的语音识别最终结果: '${result.text}', 信心度: ${result.confidence}")
+
+                            withContext(Dispatchers.Main) {
+                                // 获取当前输入框内容
+                                val currentText = messageProcessingDelegate.userMessage.value.trim()
+
+                                // 确定如何组合新的识别结果
+                                val newText = when {
+                                    // 如果当前没有文本，直接使用识别结果
+                                    currentText.isEmpty() -> result.text
+
+                                    // 如果当前文本已经包含识别结果(部分识别已经更新过)，则不重复添加
+                                    currentText == result.text -> currentText
+
+                                    // 如果当前文本是识别结果的一部分，则使用完整结果
+                                    result.text.contains(currentText) -> result.text
+
+                                    // 否则将新识别结果附加到当前文本后面
+                                    else -> "$currentText ${result.text}"
                                 }
-                            } else {
-                                // 识别出错
-                                Log.e(TAG, "语音识别错误: ${result.error.message} (Code: ${result.error.code})")
-                                if (result.error.code != SpeechRecognizer.ERROR_NO_MATCH) {
-                                    // 对于非"没有匹配"的错误显示提示
-                                    uiStateDelegate.showToast("语音识别错误: ${result.error.message}")
-                                } else {
-                                    // 对于NO_MATCH错误也显示一个友好提示
-                                    Log.d(TAG, "语音识别无匹配结果")
-                                    uiStateDelegate.showToast("未能识别您的语音，请重试")
-                                }
+
+                                // 直接在主线程更新用户消息
+                                messageProcessingDelegate.updateUserMessage(newText)
                             }
-                            
-                            // 通知服务停止监听，确保资源释放
-                            if (wasListening) {
-                                service.stopListening()
-                                Log.d(TAG, "语音识别过程完成，停止监听")
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "处理语音识别结果时出错", e)
+                        } else {
+                            // 文本为空但没有错误，可能是静音
+                            Log.w(TAG, "语音识别成功但结果为空")
+                            uiStateDelegate.showToast("没有识别到语音内容，请重试")
+                        }
+                    } else {
+                        // 识别出错
+                        Log.e(TAG, "语音识别错误: ${result.error.message} (Code: ${result.error.code})")
+                        if (result.error.code != SpeechRecognizer.ERROR_NO_MATCH) {
+                            // 对于非"没有匹配"的错误显示提示
+                            uiStateDelegate.showToast("语音识别错误: ${result.error.message}")
+                        } else {
+                            // 对于NO_MATCH错误也显示一个友好提示
+                            Log.d(TAG, "语音识别无匹配结果")
+                            uiStateDelegate.showToast("未能识别您的语音，请重试")
                         }
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "监听语音识别结果流时出错", e)
+
+                    // 通知服务停止监听，确保资源释放
+                    if (wasListening) {
+                        service.stopListening()
+                        Log.d(TAG, "语音识别过程完成，停止监听")
+                    }
                 }
             }
             

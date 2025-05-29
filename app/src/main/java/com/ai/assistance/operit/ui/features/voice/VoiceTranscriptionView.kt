@@ -21,6 +21,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -30,10 +32,12 @@ import com.ai.assistance.operit.data.model.voice.DialogueTurn
 /**
  * Displays the transcription of voice inputs and outputs.
  * Shows both the dialogue history and the current partial speech text.
+ * Styled to match the "Live" interface design.
  * 
  * @param dialogueHistory List of dialogue turns
  * @param partialSpeechText Current partial speech recognition text
  * @param dialogueState Current state of the dialogue system
+ * @param currentResponse Current AI response text (not yet in dialogue history)
  * @param modifier Optional modifier
  */
 @Composable
@@ -41,21 +45,22 @@ fun VoiceTranscriptionView(
     dialogueHistory: List<DialogueTurn>,
     partialSpeechText: String,
     dialogueState: DialogueManager.DialogueState,
+    currentResponse: String = "",
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
     
     // Scroll to bottom when new items are added
-    LaunchedEffect(dialogueHistory.size) {
-        if (dialogueHistory.isNotEmpty()) {
-            listState.animateScrollToItem(dialogueHistory.size - 1)
+    LaunchedEffect(dialogueHistory.size, currentResponse) {
+        if (dialogueHistory.isNotEmpty() || currentResponse.isNotEmpty()) {
+            listState.animateScrollToItem(dialogueHistory.size)
         }
     }
     
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+            .background(Color(0xFF1A1A1A).copy(alpha = 0.7f))
     ) {
         Column(
             modifier = Modifier.fillMaxWidth()
@@ -69,6 +74,39 @@ fun VoiceTranscriptionView(
                 items(dialogueHistory) { turn ->
                     DialogueTurnItem(turn = turn)
                 }
+                
+                // 当前AI响应（如果有）
+                if (currentResponse.isNotEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(
+                                        RoundedCornerShape(
+                                            topStart = 16.dp,
+                                            topEnd = 16.dp,
+                                            bottomStart = 4.dp,
+                                            bottomEnd = 16.dp
+                                        )
+                                    )
+                                    .background(Color(0xFF2563EB))
+                                    .padding(12.dp)
+                            ) {
+                                Text(
+                                    text = currentResponse,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+                }
             }
             
             // Partial speech text (when listening)
@@ -80,14 +118,21 @@ fun VoiceTranscriptionView(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.primaryContainer)
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFF2563EB).copy(alpha = 0.7f),
+                                    Color(0xFF3B82F6).copy(alpha = 0.7f)
+                                )
+                            )
+                        )
                         .padding(16.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = partialSpeechText,
                         style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        color = Color.White,
                         textAlign = TextAlign.Center
                     )
                 }
@@ -97,7 +142,7 @@ fun VoiceTranscriptionView(
 }
 
 /**
- * Displays a single dialogue turn.
+ * Displays a single dialogue turn with modern styling.
  * 
  * @param turn The dialogue turn to display
  * @param modifier Optional modifier
@@ -108,14 +153,28 @@ fun DialogueTurnItem(
     modifier: Modifier = Modifier
 ) {
     val alignment = if (turn.isUser) Alignment.CenterEnd else Alignment.CenterStart
+    
+    // Different styling for user vs AI messages
     val backgroundColor = if (turn.isUser) 
-        MaterialTheme.colorScheme.primaryContainer 
+        Color(0xFF0D9488) // Teal for user
     else 
-        MaterialTheme.colorScheme.secondaryContainer
-    val textColor = if (turn.isUser) 
-        MaterialTheme.colorScheme.onPrimaryContainer 
-    else 
-        MaterialTheme.colorScheme.onSecondaryContainer
+        Color(0xFF2563EB) // Blue for AI
+    
+    val bubbleShape = if (turn.isUser) {
+        RoundedCornerShape(
+            topStart = 16.dp,
+            topEnd = 16.dp,
+            bottomStart = 16.dp,
+            bottomEnd = 4.dp
+        )
+    } else {
+        RoundedCornerShape(
+            topStart = 16.dp,
+            topEnd = 16.dp,
+            bottomStart = 4.dp,
+            bottomEnd = 16.dp
+        )
+    }
     
     Box(
         modifier = modifier
@@ -125,21 +184,14 @@ fun DialogueTurnItem(
     ) {
         Box(
             modifier = Modifier
-                .clip(
-                    RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = if (turn.isUser) 16.dp else 4.dp,
-                        bottomEnd = if (turn.isUser) 4.dp else 16.dp
-                    )
-                )
+                .clip(bubbleShape)
                 .background(backgroundColor)
                 .padding(12.dp)
         ) {
             Text(
                 text = turn.text,
                 style = MaterialTheme.typography.bodyLarge,
-                color = textColor,
+                color = Color.White,
                 fontWeight = FontWeight.Normal
             )
         }

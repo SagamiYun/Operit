@@ -12,30 +12,37 @@ interface TTSService {
     suspend fun initialize(): Boolean
     
     /**
-     * Convert text to speech and play it.
-     * @param text The text to be spoken
-     * @param params Optional parameters for speech (pitch, rate, etc.)
+     * Speak a text using the TTS engine.
+     * @param text The text to speak
+     * @param params Parameters for the TTS engine
      * @return true if the operation was successful, false otherwise
      */
     suspend fun speak(text: String, params: TTSParams = TTSParams()): Boolean
     
     /**
-     * Pause the current speech.
-     * @return true if the operation was successful, false otherwise
+     * 开始流式语音播放。
+     * 将文本分割成句子，立即开始播放第一句，后续句子在前一句播放完成后继续。
+     * 
+     * @param text 要播放的文本，可以是部分文本
+     * @param params TTS参数
+     * @return 是否成功开始播放
      */
-    fun pause(): Boolean
+    suspend fun startStreamingSpeech(text: String, params: TTSParams = TTSParams()): Boolean
     
     /**
-     * Resume paused speech.
-     * @return true if the operation was successful, false otherwise
+     * 添加更多文本到当前流式播放中。
+     * 如果流式播放未开始，则启动新的流式播放。
+     * 
+     * @param additionalText 要添加的文本
+     * @param params TTS参数
+     * @return 是否成功添加
      */
-    fun resume(): Boolean
+    suspend fun appendStreamingSpeech(additionalText: String, params: TTSParams = TTSParams()): Boolean
     
     /**
-     * Stop the current speech.
-     * @return true if the operation was successful, false otherwise
+     * Stop the TTS engine from speaking.
      */
-    fun stop(): Boolean
+    fun stop()
     
     /**
      * Check if the TTS engine is currently speaking.
