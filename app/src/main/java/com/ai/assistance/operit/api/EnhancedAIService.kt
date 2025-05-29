@@ -790,18 +790,18 @@ class EnhancedAIService(
         val result: ToolResult
 
         if (executor == null) {
-            // Tool not available handling
+            // 工具不可用处理 - 不再尝试使用相同工具或循环调用
             Log.w(TAG, "Tool not available: ${invocation.tool.name}")
 
+            // 创建错误消息并添加到显示内容
             val errorDisplayContent =
                     roundManager.appendContent(
                             ConversationMarkupManager.createToolNotAvailableError(
                                     invocation.tool.name
                             )
                     )
-            responseCallback(errorDisplayContent, null)
-
-            // Create error result
+            
+            // 生成工具结果，标记为失败
             result =
                     ToolResult(
                             toolName = invocation.tool.name,
@@ -809,61 +809,77 @@ class EnhancedAIService(
                             result = StringResultData(""),
                             error = "Tool '${invocation.tool.name}' not available"
                     )
-        } else {
-            // Check permissions before execution
-            val (hasPermission, errorResult) =
-                    ToolExecutionManager.checkToolPermission(toolHandler, invocation)
+                    
+            // 添加格式化后的工具结果到显示内容
+            val resultContent = roundManager.appendContent(
+                    ConversationMarkupManager.formatToolResultForMessage(result)
+            )
+            
+            // 更新UI，显示工具不可用
+            responseCallback(resultContent, null)
+            
+            // 检查我们是否需要启动新的会话轮次
+            // 但不会尝试调用相同的工具
+            roundManager.startNewRound()
+            
+            // 直接触发完成回调，避免循环
+            onComplete()
+            return
+        }
 
-            // If permission denied, add result and exit function
-            if (!hasPermission) {
-                // Add both error status and a tool result status to ensure the UI shows the error
-                // properly
-                val errorDisplayContent =
-                        roundManager.appendContent(
-                                ConversationMarkupManager.createErrorStatus(
-                                        "Permission denied",
-                                        "Operation '${invocation.tool.name}' was not authorized"
-                                )
-                        )
+        // Check permissions before execution
+        val (hasPermission, errorResult) =
+                ToolExecutionManager.checkToolPermission(toolHandler, invocation)
 
-                // Also add a proper tool result status with error=true to ensure it shows up
-                // correctly in the UI
-                val toolResultStatusContent =
-                        roundManager.appendContent(
-                                ConversationMarkupManager.createToolResultStatus(
-                                        invocation.tool.name,
-                                        success = false,
-                                        resultText =
-                                                "Permission denied: Operation '${invocation.tool.name}' was not authorized"
-                                )
-                        )
+        // If permission denied, add result and exit function
+        if (!hasPermission) {
+            // Add both error status and a tool result status to ensure the UI shows the error
+            // properly
+            val errorDisplayContent =
+                    roundManager.appendContent(
+                            ConversationMarkupManager.createErrorStatus(
+                                    "Permission denied",
+                                    "Operation '${invocation.tool.name}' was not authorized"
+                            )
+                    )
 
-                // Update UI with the error content
-                responseCallback(toolResultStatusContent, null)
-
-                // Process error result and exit
-                if (errorResult != null) {
-                    processToolResult(errorResult, onComplete)
-                }
-                return
-            }
-
-            // Execute the tool
-            result = ToolExecutionManager.executeToolSafely(invocation, executor)
-
-            // Display tool execution result
-            val toolResultString =
-                    if (result.success) result.result.toString() else "${result.error}"
-            val resultDisplayContent =
+            // Also add a proper tool result status with error=true to ensure it shows up
+            // correctly in the UI
+            val toolResultStatusContent =
                     roundManager.appendContent(
                             ConversationMarkupManager.createToolResultStatus(
                                     invocation.tool.name,
-                                    result.success,
-                                    toolResultString
+                                    success = false,
+                                    resultText =
+                                            "Permission denied: Operation '${invocation.tool.name}' was not authorized"
                             )
                     )
-            responseCallback(resultDisplayContent, null)
+
+            // Update UI with the error content
+            responseCallback(toolResultStatusContent, null)
+
+            // Process error result and exit
+            if (errorResult != null) {
+                processToolResult(errorResult, onComplete)
+            }
+            return
         }
+
+        // Execute the tool
+        result = ToolExecutionManager.executeToolSafely(invocation, executor)
+
+        // Display tool execution result
+        val toolResultString =
+                if (result.success) result.result.toString() else "${result.error}"
+        val resultDisplayContent =
+                roundManager.appendContent(
+                        ConversationMarkupManager.createToolResultStatus(
+                                invocation.tool.name,
+                                result.success,
+                                toolResultString
+                        )
+                )
+        responseCallback(resultDisplayContent, null)
 
         // Process the tool result
         processToolResult(result, onComplete)

@@ -12,6 +12,7 @@ sealed class Screen {
     data object Help : Screen()
     data object About : Screen()
     data object TokenConfig : Screen() // New screen for token configuration
+    data object AIAgent : Screen() // New screen for AI Agent voice dialogue mode
 
     // Secondary screens
     data object ToolPermission : Screen()

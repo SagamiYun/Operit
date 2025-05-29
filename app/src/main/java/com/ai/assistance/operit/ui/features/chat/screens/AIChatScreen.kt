@@ -57,7 +57,8 @@ fun AIChatScreen(
         onError: (String) -> Unit = {},
         hasBackgroundImage: Boolean = false,
         onNavigateToTokenConfig: () -> Unit = {}, // 添加导航到Token配置页面的回调
-        onNavigateToSettings: () -> Unit = {} // 添加导航到Settings页面的回调
+        onNavigateToSettings: () -> Unit = {}, // 添加导航到Settings页面的回调
+        onNavigateToAIAgent: () -> Unit = {} // 添加导航到AI Agent语音对话模式的回调
 ) {
         val context = LocalContext.current
         val density = LocalDensity.current
@@ -586,7 +587,9 @@ fun AIChatScreen(
                                                         actualViewModel.startVoiceRecognition()
                                                     }
                                                 },
-                                                isListening = isListening
+                                                isListening = isListening,
+                                                // 添加导航到AI Agent语音对话模式的回调
+                                                onNavigateToAIAgent = onNavigateToAIAgent
                                         )
                                 }
                         }

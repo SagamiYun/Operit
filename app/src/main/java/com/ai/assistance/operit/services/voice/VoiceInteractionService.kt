@@ -59,6 +59,13 @@ class VoiceInteractionService : Service() {
     val dialogueState: StateFlow<DialogueManager.DialogueState> get() = dialogueManager.dialogueState
     val partialSpeechText: StateFlow<String> get() = dialogueManager.partialSpeechText
     val dialogueHistory: StateFlow<List<com.ai.assistance.operit.data.model.voice.DialogueTurn>> get() = dialogueManager.dialogueHistory
+
+    // Audio amplitude for visualization
+    private val _audioAmplitude = MutableStateFlow(0f)
+    val audioAmplitude: StateFlow<Float> = _audioAmplitude.asStateFlow()
+
+    // Custom speech result handler
+    private var speechResultHandler: ((String) -> Unit)? = null
     
     companion object {
         private const val TAG = "VoiceInteractionSvc"
@@ -152,7 +159,7 @@ class VoiceInteractionService : Service() {
     /**
      * Start listening for user speech.
      */
-    fun startListening() {
+    fun startListening(continuous: Boolean = false, onResult: (String) -> Unit = {}) {
         if (!_isInitialized.value) {
             Log.e(TAG, "Cannot start listening - dialogue system not initialized")
             return
@@ -160,19 +167,27 @@ class VoiceInteractionService : Service() {
         
         serviceScope.launch {
             val preferences = _currentVoicePreferences.value
-            val continuous = preferences.continuousListening
+            val useContinuous = continuous || preferences.continuousListening
             
-            dialogueManager.startListening(continuous) { text ->
+            // Start sampling audio amplitude for visualization
+            startAmplitudeSampling()
+            
+            dialogueManager.startListening(useContinuous) { text ->
                 // This callback is called when a final speech result is recognized
                 Log.d(TAG, "Speech recognized: $text")
                 
-                // Here you would process the recognized text, perhaps sending it
-                // to your AI processing module and getting a response
-                val response = "I heard you say: $text"
-                
-                // Speak the response
-                serviceScope.launch {
-                    speakResponse(response)
+                // Call the custom handler if set
+                speechResultHandler?.invoke(text) ?: run {
+                    // Otherwise, use the provided callback
+                    onResult(text)
+                    
+                    // Default behavior if no custom handler is set
+                    val response = "I heard you say: $text"
+                    
+                    // Speak the response
+                    serviceScope.launch {
+                        speakResponse(response)
+                    }
                 }
             }
         }
@@ -274,6 +289,36 @@ class VoiceInteractionService : Service() {
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
             .addAction(android.R.drawable.ic_menu_call, "Listen", listenPendingIntent)
             .build()
+    }
+    
+    /**
+     * Set a custom handler for speech recognition results.
+     * This handler will be called when speech is recognized, instead of the default behavior.
+     * @param handler The function to call with the recognized text
+     */
+    fun setSpeechResultHandler(handler: (String) -> Unit) {
+        speechResultHandler = handler
+    }
+    
+    /**
+     * Start sampling audio amplitude for waveform visualization.
+     * This simulates audio amplitude until we have a real implementation.
+     */
+    private fun startAmplitudeSampling() {
+        // In a real implementation, we would get actual audio amplitude from the 
+        // audio recording system. For now, we'll use the speech recognition state
+        // to simulate amplitude.
+        serviceScope.launch {
+            dialogueManager.dialogueState.collectLatest { state ->
+                if (state == DialogueManager.DialogueState.LISTENING) {
+                    // When listening, generate random amplitude values between 0.2 and 0.8
+                    _audioAmplitude.value = (0.2f + Math.random().toFloat() * 0.6f)
+                } else {
+                    // When not listening, reset to 0
+                    _audioAmplitude.value = 0f
+                }
+            }
+        }
     }
     
     override fun onBind(intent: Intent): IBinder {

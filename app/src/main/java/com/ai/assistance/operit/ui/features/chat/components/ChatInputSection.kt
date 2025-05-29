@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
@@ -67,7 +70,8 @@ fun ChatInputSection(
         externalAttachmentPanelState: Boolean? = null,
         onAttachmentPanelStateChange: ((Boolean) -> Unit)? = null,
         onVoiceRecognitionRequest: () -> Unit = {},
-        isListening: Boolean = false
+        isListening: Boolean = false,
+        onNavigateToAIAgent: () -> Unit = {}
 ) {
         val modernTextStyle = TextStyle(fontSize = 13.sp, lineHeight = 16.sp)
 
@@ -91,330 +95,335 @@ fun ChatInputSection(
                 onAttachmentPanelStateChange?.invoke(showAttachmentPanel)
         }
 
-        Surface(
-                color =
-                        if (hasBackgroundImage)
+        // Gemini-style input layout
+        Box(modifier = modifier) {
+                // Main surface with input field and buttons
+                Surface(
+                        color = if (hasBackgroundImage)
                                 MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
-                        else MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
-                modifier = modifier.shadow(4.dp)
-        ) {
-                Column {
-                        // Input processing indicator
-                        SimpleAnimatedVisibility(visible = isProcessingInput) {
-                                val progressColor =
-                                        when {
-                                                inputProcessingMessage.contains("工具执行后") ->
-                                                        MaterialTheme.colorScheme.tertiary.copy(
-                                                                alpha = 0.8f
+                              else MaterialTheme.colorScheme.surface,
+                        tonalElevation = 3.dp,
+                        shadowElevation = 4.dp,
+                        shape = RoundedCornerShape(24.dp),
+                        modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                        Column {
+                                // Input processing indicator
+                                SimpleAnimatedVisibility(visible = isProcessingInput) {
+                                        val progressColor =
+                                                when {
+                                                        inputProcessingMessage.contains("工具执行后") ->
+                                                                MaterialTheme.colorScheme.tertiary.copy(
+                                                                        alpha = 0.8f
+                                                                )
+                                                        inputProcessingMessage.contains("Connecting") ||
+                                                                inputProcessingMessage.contains("连接") ->
+                                                                MaterialTheme.colorScheme.tertiary
+                                                        inputProcessingMessage.contains("Receiving") ||
+                                                                inputProcessingMessage.contains("响应") ->
+                                                                MaterialTheme.colorScheme.secondary
+                                                        else -> MaterialTheme.colorScheme.primary
+                                                }
+
+                                        val progressValue =
+                                                if (inputProcessingMessage.contains("准备")) 0.3f
+                                                else if (inputProcessingMessage.contains("连接")) 0.6f else 1f
+
+                                        SimpleLinearProgressIndicator(
+                                                progress = progressValue,
+                                                modifier = Modifier.fillMaxWidth(),
+                                                color = progressColor
+                                        )
+
+                                        if (inputProcessingMessage.isNotBlank()) {
+                                                Row(
+                                                        modifier =
+                                                                Modifier.fillMaxWidth()
+                                                                        .padding(
+                                                                                horizontal = 16.dp,
+                                                                                vertical = 4.dp
+                                                                        ),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                        Text(
+                                                                text = inputProcessingMessage,
+                                                                style = MaterialTheme.typography.bodySmall,
+                                                                color =
+                                                                        MaterialTheme.colorScheme.onSurface
+                                                                                .copy(alpha = 0.8f),
+                                                                modifier = Modifier.weight(1f)
                                                         )
-                                                inputProcessingMessage.contains("Connecting") ||
-                                                        inputProcessingMessage.contains("连接") ->
-                                                        MaterialTheme.colorScheme.tertiary
-                                                inputProcessingMessage.contains("Receiving") ||
-                                                        inputProcessingMessage.contains("响应") ->
-                                                        MaterialTheme.colorScheme.secondary
-                                                else -> MaterialTheme.colorScheme.primary
+                                                }
                                         }
+                                }
 
-                                val progressValue =
-                                        if (inputProcessingMessage.contains("准备")) 0.3f
-                                        else if (inputProcessingMessage.contains("连接")) 0.6f else 1f
-
-                                SimpleLinearProgressIndicator(
-                                        progress = progressValue,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = progressColor
-                                )
-
-                                if (inputProcessingMessage.isNotBlank()) {
-                                        Row(
+                                // Attachment chips row - only show if there are attachments
+                                if (attachments.isNotEmpty()) {
+                                        LazyRow(
                                                 modifier =
                                                         Modifier.fillMaxWidth()
                                                                 .padding(
                                                                         horizontal = 16.dp,
                                                                         vertical = 4.dp
                                                                 ),
-                                                verticalAlignment = Alignment.CenterVertically
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
-                                                Text(
-                                                        text = inputProcessingMessage,
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color =
-                                                                MaterialTheme.colorScheme.onSurface
-                                                                        .copy(alpha = 0.8f),
-                                                        modifier = Modifier.weight(1f)
-                                                )
+                                                items(attachments) { attachment ->
+                                                        AttachmentChip(
+                                                                attachmentInfo = attachment,
+                                                                onRemove = {
+                                                                        onRemoveAttachment(
+                                                                                attachment.filePath
+                                                                        )
+                                                                },
+                                                                onInsert = {
+                                                                        onInsertAttachment(attachment)
+                                                                }
+                                                        )
+                                                }
                                         }
                                 }
-                        }
 
-                        // Attachment chips row - only show if there are attachments
-                        if (attachments.isNotEmpty()) {
-                                LazyRow(
+                                // Input row with all buttons
+                                Row(
                                         modifier =
                                                 Modifier.fillMaxWidth()
-                                                        .padding(
-                                                                horizontal = 16.dp,
-                                                                vertical = 4.dp
-                                                        ),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                        items(attachments) { attachment ->
-                                                AttachmentChip(
-                                                        attachmentInfo = attachment,
-                                                        onRemove = {
-                                                                onRemoveAttachment(
-                                                                        attachment.filePath
-                                                                )
-                                                        },
-                                                        onInsert = {
-                                                                onInsertAttachment(attachment)
-                                                        }
-                                                )
-                                        }
-                                }
-                        }
-
-                        Row(
-                                modifier =
-                                        Modifier.fillMaxWidth()
-                                                .padding(horizontal = 16.dp)
-                                                .padding(top = 8.dp, bottom = 8.dp)
-                                                .wrapContentHeight(),
-                                verticalAlignment = Alignment.CenterVertically
-                        ) {
-                                // Input field (保持原有高度)
-                                OutlinedTextField(
-                                        value = userMessage,
-                                        onValueChange = onUserMessageChange,
-                                        placeholder = {
-                                                Text("请输入您的问题...", style = modernTextStyle)
-                                        },
-                                        modifier = Modifier.weight(1f).heightIn(min = 38.dp),
-                                        textStyle = modernTextStyle,
-                                        maxLines = 5,
-                                        minLines = 1,
-                                        singleLine = false,
-                                        keyboardOptions =
-                                                KeyboardOptions(imeAction = ImeAction.Default),
-                                        keyboardActions = KeyboardActions(),
-                                        colors =
-                                                OutlinedTextFieldDefaults.colors(
-                                                        focusedBorderColor =
-                                                                MaterialTheme.colorScheme.primary,
-                                                        unfocusedBorderColor =
-                                                                MaterialTheme.colorScheme.outline
-                                                ),
-                                        shape = RoundedCornerShape(16.dp),
-                                        enabled = !isProcessing || allowTextInputWhileProcessing
-                                )
-
-                                // Spacing between text field and buttons
-                                Spacer(modifier = Modifier.width(8.dp))
-
-                                // Voice recognition button
-                                val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            if (isListening) 
-                                                MaterialTheme.colorScheme.primary
-                                            else 
-                                                MaterialTheme.colorScheme.primaryContainer,
-                                            CircleShape
-                                        )
-                                        .clickable(
-                                            enabled = !isProcessing,
-                                            onClick = { 
-                                                Log.d("ChatInputSection", "语音按钮被点击，当前isListening: $isListening") 
-                                                // 清除焦点，避免键盘干扰
-                                                focusManager.clearFocus()
-                                                
-                                                // 调用语音识别回调
-                                                onVoiceRecognitionRequest()
-                                            }
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    // Remember the previous listening state to animate transitions
-                                    val previousListening = remember { mutableStateOf(isListening) }
-                                    val animatedColor by animateColorAsState(
-                                        targetValue = if (isListening) 
-                                                       MaterialTheme.colorScheme.onPrimary
-                                                     else 
-                                                       MaterialTheme.colorScheme.onPrimaryContainer,
-                                        animationSpec = tween(300),
-                                        label = "micIconColor"
-                                    )
-                                    
-                                    // Detect state changes for additional feedback
-                                    LaunchedEffect(isListening) {
-                                        if (previousListening.value && !isListening) {
-                                            // Transitioning from listening to not listening
-                                            // Could add haptic feedback here if desired
-                                        }
-                                        previousListening.value = isListening
-                                    }
-                                    
-                                    Icon(
-                                        imageVector = Icons.Default.Mic,
-                                        contentDescription = if (isListening) "停止语音输入" else "语音输入",
-                                        tint = animatedColor
-                                    )
-                                    
-                                    // Add pulsing animation when listening
-                                    if (isListening) {
-                                        val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(
-                                            label = "micPulse"
-                                        )
-                                        val scale by infiniteTransition.animateFloat(
-                                            initialValue = 1f,
-                                            targetValue = 1.2f,
-                                            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                                                animation = androidx.compose.animation.core.tween(700),
-                                                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
-                                            ),
-                                            label = "pulseAnimation"
-                                        )
-                                        
+                                        // Voice recognition button
+                                        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
                                         Box(
                                             modifier = Modifier
                                                 .size(40.dp)
-                                                .scale(scale)
-                                                .border(
-                                                    width = 2.dp,
-                                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                                                    shape = CircleShape
+                                                .clip(CircleShape)
+                                                .background(
+                                                    if (isListening) 
+                                                        MaterialTheme.colorScheme.primary
+                                                    else 
+                                                        MaterialTheme.colorScheme.primaryContainer,
+                                                    CircleShape
                                                 )
+                                                .clickable(
+                                                    enabled = !isProcessing,
+                                                    onClick = { 
+                                                        Log.d("ChatInputSection", "语音按钮被点击，当前isListening: $isListening") 
+                                                        // 清除焦点，避免键盘干扰
+                                                        focusManager.clearFocus()
+                                                        
+                                                        // 调用语音识别回调
+                                                        onVoiceRecognitionRequest()
+                                                    }
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            // Remember the previous listening state to animate transitions
+                                            val previousListening = remember { mutableStateOf(isListening) }
+                                            val animatedColor by animateColorAsState(
+                                                targetValue = if (isListening) 
+                                                               MaterialTheme.colorScheme.onPrimary
+                                                             else 
+                                                               MaterialTheme.colorScheme.onPrimaryContainer,
+                                                animationSpec = tween(300),
+                                                label = "micIconColor"
+                                            )
+                                            
+                                            // Detect state changes for additional feedback
+                                            LaunchedEffect(isListening) {
+                                                if (previousListening.value && !isListening) {
+                                                    // Transitioning from listening to not listening
+                                                    // Could add haptic feedback here if desired
+                                                }
+                                                previousListening.value = isListening
+                                            }
+                                            
+                                            Icon(
+                                                imageVector = Icons.Default.Mic,
+                                                contentDescription = if (isListening) "停止语音输入" else "语音输入",
+                                                tint = animatedColor
+                                            )
+                                            
+                                            // Add pulsing animation when listening
+                                            if (isListening) {
+                                                val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(
+                                                    label = "micPulse"
+                                                )
+                                                val scale by infiniteTransition.animateFloat(
+                                                    initialValue = 1f,
+                                                    targetValue = 1.2f,
+                                                    animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                                                        animation = androidx.compose.animation.core.tween(700),
+                                                        repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+                                                    ),
+                                                    label = "pulseAnimation"
+                                                )
+                                                
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(40.dp)
+                                                        .scale(scale)
+                                                        .border(
+                                                            width = 2.dp,
+                                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                                            shape = CircleShape
+                                                        )
+                                                )
+                                            }
+                                        }
+
+                                        // Input field
+                                        OutlinedTextField(
+                                                value = userMessage,
+                                                onValueChange = onUserMessageChange,
+                                                placeholder = {
+                                                        Text("请输入您的问题...", style = modernTextStyle)
+                                                },
+                                                modifier = Modifier
+                                                        .weight(1f)
+                                                        .padding(horizontal = 8.dp)
+                                                        .heightIn(min = 40.dp),
+                                                textStyle = modernTextStyle,
+                                                maxLines = 5,
+                                                minLines = 1,
+                                                singleLine = false,
+                                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                                                keyboardActions = KeyboardActions(),
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                                                ),
+                                                shape = RoundedCornerShape(20.dp),
+                                                enabled = !isProcessing || allowTextInputWhileProcessing
                                         )
-                                    }
-                                }
 
-                                // Spacing between buttons
-                                Spacer(modifier = Modifier.width(8.dp))
-
-                                // Attachment button (+ 按钮) - 确保圆形
-                                Box(
-                                        modifier =
-                                                Modifier.size(42.dp)
+                                        // Attachment button (+ 按钮)
+                                        Box(
+                                                modifier = Modifier
+                                                        .size(40.dp)
                                                         .clip(CircleShape)
                                                         .background(
                                                                 if (showAttachmentPanel)
-                                                                        MaterialTheme.colorScheme
-                                                                                .primary
+                                                                        MaterialTheme.colorScheme.primary
                                                                 else
-                                                                        MaterialTheme.colorScheme
-                                                                                .surfaceVariant
+                                                                        MaterialTheme.colorScheme.surfaceVariant
                                                         )
                                                         .clickable(
                                                                 enabled = !isProcessing,
                                                                 onClick = {
-                                                                        setShowAttachmentPanel(
-                                                                                !showAttachmentPanel
-                                                                        )
+                                                                        setShowAttachmentPanel(!showAttachmentPanel)
                                                                 }
                                                         ),
-                                        contentAlignment = Alignment.Center
-                                ) {
-                                        Icon(
-                                                imageVector = Icons.Default.Add,
-                                                contentDescription = "添加附件",
-                                                tint =
-                                                        if (showAttachmentPanel)
+                                                contentAlignment = Alignment.Center
+                                        ) {
+                                                Icon(
+                                                        imageVector = Icons.Default.Add,
+                                                        contentDescription = "添加附件",
+                                                        tint = if (showAttachmentPanel)
                                                                 MaterialTheme.colorScheme.onPrimary
-                                                        else
-                                                                MaterialTheme.colorScheme
-                                                                        .onSurfaceVariant,
-                                                modifier = Modifier.size(22.dp)
-                                        )
-                                }
+                                                              else
+                                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                        }
 
-                                Spacer(modifier = Modifier.width(12.dp))
+                                        // AI Agent button (new button)
+                                        Box(
+                                                modifier = Modifier
+                                                        .padding(start = 8.dp)
+                                                        .size(40.dp)
+                                                        .clip(CircleShape)
+                                                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                                                        .clickable(
+                                                                enabled = !isProcessing,
+                                                                onClick = onNavigateToAIAgent
+                                                        ),
+                                                contentAlignment = Alignment.Center
+                                        ) {
+                                                Icon(
+                                                        imageVector = Icons.Default.SmartToy,
+                                                        contentDescription = "AI Agent语音对话模式",
+                                                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                                                )
+                                        }
 
-                                // Send button (发送按钮) - 确保圆形
-                                Box(
-                                        modifier =
-                                                Modifier.size(42.dp)
+                                        // Send button
+                                        Box(
+                                                modifier = Modifier
+                                                        .padding(start = 8.dp)
+                                                        .size(40.dp)
                                                         .clip(CircleShape)
                                                         .background(
                                                                 when {
                                                                         isProcessing ->
-                                                                                MaterialTheme
-                                                                                        .colorScheme
-                                                                                        .error
+                                                                                MaterialTheme.colorScheme.error
                                                                         userMessage.isNotBlank() ||
-                                                                                attachments
-                                                                                        .isNotEmpty() ->
-                                                                                MaterialTheme
-                                                                                        .colorScheme
-                                                                                        .primary
+                                                                                attachments.isNotEmpty() ->
+                                                                                MaterialTheme.colorScheme.primary
                                                                         else ->
-                                                                                MaterialTheme
-                                                                                        .colorScheme
-                                                                                        .primary
-                                                                                        .copy(
-                                                                                                alpha =
-                                                                                                        0.5f
-                                                                                        )
+                                                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                                                                 }
                                                         )
                                                         .clickable(
-                                                                enabled =
-                                                                        if (isProcessing) true
-                                                                        else
-                                                                                userMessage
-                                                                                        .isNotBlank() ||
-                                                                                        attachments
-                                                                                                .isNotEmpty(),
+                                                                enabled = isProcessing || userMessage.isNotBlank() || attachments.isNotEmpty(),
                                                                 onClick = {
                                                                         if (isProcessing) {
                                                                                 onCancelMessage()
                                                                         } else {
                                                                                 onSendMessage()
-                                                                                // 发送消息后关闭附件面板
-                                                                                setShowAttachmentPanel(
-                                                                                        false
-                                                                                )
+                                                                                setShowAttachmentPanel(false)
                                                                         }
                                                                 }
                                                         ),
-                                        contentAlignment = Alignment.Center
-                                ) {
-                                        Icon(
-                                                imageVector =
-                                                        if (isProcessing) Icons.Default.Close
-                                                        else Icons.Default.Send,
-                                                contentDescription =
-                                                        if (isProcessing) "取消" else "发送",
-                                                tint =
-                                                        if (isProcessing)
+                                                contentAlignment = Alignment.Center
+                                        ) {
+                                                Icon(
+                                                        imageVector = if (isProcessing) Icons.Default.Close else Icons.Default.Send,
+                                                        contentDescription = if (isProcessing) "取消" else "发送",
+                                                        tint = if (isProcessing)
                                                                 MaterialTheme.colorScheme.onError
-                                                        else MaterialTheme.colorScheme.onPrimary,
-                                                modifier = Modifier.size(22.dp)
-                                        )
+                                                              else
+                                                                MaterialTheme.colorScheme.onPrimary
+                                                )
+                                        }
                                 }
                         }
+                }
 
-                        // 附件选择面板 - 移动到输入框下方
-                        AttachmentSelectorPanel(
-                                visible = showAttachmentPanel,
-                                onAttachImage = { filePath ->
-                                        // 传递文件路径给外部处理函数
-                                        onAttachmentRequest(filePath)
-                                },
-                                onAttachFile = { filePath ->
-                                        // 传递文件路径给外部处理函数
-                                        onAttachmentRequest(filePath)
-                                },
-                                onAttachScreenContent = onAttachScreenContent,
-                                onAttachNotifications = onAttachNotifications,
-                                onAttachLocation = onAttachLocation,
-                                onAttachProblemMemory = onAttachProblemMemory,
-                                userQuery = userMessage,
-                                onDismiss = { setShowAttachmentPanel(false) }
+                // 附件选择面板 - 移动到输入框下方
+                AttachmentSelectorPanel(
+                        visible = showAttachmentPanel,
+                        onAttachImage = { filePath ->
+                                // 传递文件路径给外部处理函数
+                                onAttachmentRequest(filePath)
+                        },
+                        onAttachFile = { filePath ->
+                                // 传递文件路径给外部处理函数
+                                onAttachmentRequest(filePath)
+                        },
+                        onAttachScreenContent = onAttachScreenContent,
+                        onAttachNotifications = onAttachNotifications,
+                        onAttachLocation = onAttachLocation,
+                        onAttachProblemMemory = onAttachProblemMemory,
+                        userQuery = userMessage,
+                        onDismiss = { setShowAttachmentPanel(false) }
+                )
+
+                // Add a gradient background under the input box if needed
+                if (hasBackgroundImage) {
+                        Box(
+                                modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(80.dp)
+                                        .align(Alignment.BottomCenter)
+                                        .background(
+                                                Brush.verticalGradient(
+                                                        colors = listOf(
+                                                                Color.Transparent,
+                                                                MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                                                        )
+                                                )
+                                        )
                         )
                 }
         }

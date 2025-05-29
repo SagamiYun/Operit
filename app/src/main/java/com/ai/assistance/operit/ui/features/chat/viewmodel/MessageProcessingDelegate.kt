@@ -56,21 +56,7 @@ class MessageProcessingDelegate(
 
     /** 更新用户消息 */
     fun updateUserMessage(message: String) {
-        try {
-            Log.d(TAG, "更新用户消息: '$message'")
-            _userMessage.value = message
-        } catch (e: Exception) {
-            Log.e(TAG, "更新用户消息时出错: ${e.message}", e)
-            // 如果出错，使用协程尝试再次更新
-            viewModelScope.launch {
-                try {
-                    _userMessage.value = message
-                    Log.d(TAG, "用户消息已在协程中更新")
-                } catch (innerE: Exception) {
-                    Log.e(TAG, "再次尝试更新用户消息失败: ${innerE.message}", innerE)
-                }
-            }
-        }
+        _userMessage.value = message
     }
 
     /** 向AI发送用户消息(无附件版本) 为了保持向后兼容性 */
