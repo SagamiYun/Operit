@@ -273,4 +273,12 @@ class DialogueManager(
         speechRecognitionService.shutdown()
         _dialogueState.value = DialogueState.IDLE
     }
+
+    fun pauseSpeaking() {
+        // TODO
+        if (_dialogueState.value == DialogueState.SPEAKING) {
+            ttsService.pause()
+            _dialogueState.value = DialogueState.IDLE
+        }
+    }
 } 

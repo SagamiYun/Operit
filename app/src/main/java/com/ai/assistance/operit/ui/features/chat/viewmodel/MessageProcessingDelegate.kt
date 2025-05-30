@@ -64,11 +64,15 @@ class MessageProcessingDelegate(
         sendUserMessage(emptyList())
     }
 
+    fun sendUserMessage(timestamp: Long) {
+        sendUserMessage(emptyList(), timestamp)
+    }
+
     /**
      * 向AI发送用户消息(带附件版本)
      * @param attachments 要发送的附件列表
      */
-    fun sendUserMessage(attachments: List<AttachmentInfo> = emptyList()) {
+    fun sendUserMessage(attachments: List<AttachmentInfo> = emptyList(), timestamp: Long? = null ) {
         if (_userMessage.value.isBlank() && attachments.isEmpty()) {
             return
         }
@@ -125,7 +129,12 @@ class MessageProcessingDelegate(
                 }
 
         // 添加用户消息到聊天历史
-        addMessageToChat(ChatMessage(sender = "user", content = finalMessage))
+        if (timestamp != null) {
+            addMessageToChat(ChatMessage(sender = "user", content = finalMessage, timestamp))
+        } else {
+            addMessageToChat(ChatMessage(sender = "user", content = finalMessage))
+        }
+
 
         // 使用viewModelScope启动协程
         viewModelScope.launch {

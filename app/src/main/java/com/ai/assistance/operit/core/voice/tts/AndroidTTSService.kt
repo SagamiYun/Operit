@@ -338,4 +338,9 @@ class AndroidTTSService(private val context: Context) : TTSService {
             Log.e(TAG, "Error shutting down TTS", e)
         }
     }
+
+    override fun pause() {
+        // TODO
+        tts?.stop()
+    }
 } 

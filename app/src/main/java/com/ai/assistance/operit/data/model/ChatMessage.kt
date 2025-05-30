@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class ChatMessage(
-    val sender: String, // "user" or "ai"
+    val sender: String, // "user" | "ai" | "thinking"
     val content: String,
     val timestamp: Long = System.currentTimeMillis()
 ) : Parcelable {

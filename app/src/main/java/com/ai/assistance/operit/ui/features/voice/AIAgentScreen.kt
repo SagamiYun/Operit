@@ -1,13 +1,8 @@
 package com.ai.assistance.operit.ui.features.voice
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,11 +11,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VoiceChat
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -82,7 +76,6 @@ fun AIAgentScreen(
                 )
             )
     ) {
-        // Only show the "Live" label in center top
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -91,7 +84,7 @@ fun AIAgentScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = Icons.Default.Videocam,
+                imageVector = Icons.Default.VoiceChat,
                 contentDescription = null,
                 tint = Color.White,
                 modifier = Modifier.size(24.dp)
@@ -100,7 +93,7 @@ fun AIAgentScreen(
             Spacer(modifier = Modifier.padding(horizontal = 4.dp))
             
             Text(
-                text = "Live",
+                text = "Agent",
                 style = MaterialTheme.typography.titleMedium.copy(fontSize = 20.sp),
                 color = Color.White
             )

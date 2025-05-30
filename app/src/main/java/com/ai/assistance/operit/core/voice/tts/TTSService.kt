@@ -55,6 +55,8 @@ interface TTSService {
      * Should be called when the TTS service is no longer needed.
      */
     fun shutdown()
+
+    fun pause()
 }
 
 /**

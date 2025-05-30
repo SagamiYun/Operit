@@ -164,26 +164,25 @@ class VoiceInteractionService : Service() {
             Log.e(TAG, "Cannot start listening - dialogue system not initialized")
             return
         }
-        
+
         serviceScope.launch {
             val preferences = _currentVoicePreferences.value
             val useContinuous = continuous || preferences.continuousListening
-            
+
             // Start sampling audio amplitude for visualization
             startAmplitudeSampling()
-            
+
             dialogueManager.startListening(useContinuous) { text ->
                 // This callback is called when a final speech result is recognized
                 Log.d(TAG, "Speech recognized: $text")
-                
                 // Call the custom handler if set
                 speechResultHandler?.invoke(text) ?: run {
                     // Otherwise, use the provided callback
                     onResult(text)
-                    
+
                     // Default behavior if no custom handler is set
                     val response = "I heard you say: $text"
-                    
+
                     // Speak the response
                     serviceScope.launch {
                         speakResponse(response)
@@ -227,6 +226,42 @@ class VoiceInteractionService : Service() {
     }
     
     /**
+     * Append text to the current TTS stream.
+     * This is used for streaming responses where text arrives in chunks.
+     * 
+     * @param text The additional text to speak
+     * @return True if successfully added to the speech queue, false otherwise
+     */
+    suspend fun appendToSpeak(text: String): Boolean {
+        if (!_isInitialized.value) {
+            Log.e(TAG, "Cannot append speech - dialogue system not initialized")
+            return false
+        }
+        
+        val preferences = _currentVoicePreferences.value
+        if (!preferences.isTtsEnabled) {
+            Log.d(TAG, "TTS is disabled in preferences")
+            return false
+        }
+        
+        val params = TTSParams(
+            pitch = preferences.ttsPitch,
+            rate = preferences.ttsRate,
+            volume = preferences.ttsVolume,
+            language = preferences.ttsLanguage,
+            voice = preferences.ttsVoice
+        )
+        
+        // If TTS is not currently speaking, start with this chunk
+        return if (!ttsService.isSpeaking()) {
+            ttsService.startStreamingSpeech(text, params)
+        } else {
+            // Otherwise append to the current speech
+            ttsService.appendStreamingSpeech(text, params)
+        }
+    }
+    
+    /**
      * Stop the TTS engine from speaking.
      */
     fun stopSpeaking() {
@@ -238,6 +273,10 @@ class VoiceInteractionService : Service() {
      */
     fun isDialogueActive(): Boolean {
         return dialogueManager.isActive()
+    }
+
+    fun pauseSpeaking() {
+        dialogueManager.pauseSpeaking()
     }
     
     /**
