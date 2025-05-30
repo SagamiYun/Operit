@@ -50,7 +50,9 @@ class MessageProcessingDelegate(
     val inputProcessingMessage: StateFlow<String> = _inputProcessingMessage.asStateFlow()
     
     // 用于批处理UI更新的变量
-    private var batchedAiContent: String = ""
+    private val _batchedAiContent = MutableStateFlow("")
+    val batchedAiContent: StateFlow<String> = _batchedAiContent.asStateFlow()
+
     private var lastAiUpdateTime: Long = 0
     private var updateJob: Job? = null
 
@@ -135,7 +137,6 @@ class MessageProcessingDelegate(
             addMessageToChat(ChatMessage(sender = "user", content = finalMessage))
         }
 
-
         // 使用viewModelScope启动协程
         viewModelScope.launch {
             try {
@@ -205,7 +206,7 @@ class MessageProcessingDelegate(
                 val trimmedContent = content.trim()
                 if (trimmedContent.isNotBlank()) {
                     // 保存内容到批处理缓冲区
-                    batchedAiContent = trimmedContent
+                    _batchedAiContent.value = trimmedContent
                     
                     // 获取当前时间
                     val currentTime = System.currentTimeMillis()
@@ -221,14 +222,14 @@ class MessageProcessingDelegate(
                             lastAiUpdateTime = System.currentTimeMillis()
                             
                             // 执行UI更新
-                            updateAiMessage(batchedAiContent)
+                            updateAiMessage(_batchedAiContent.value)
                             
                             // 等待下一个更新间隔
                             delay(UI_UPDATE_INTERVAL)
                             
                             // 如果在等待期间有新内容，再次更新
-                            if (batchedAiContent.trim() != trimmedContent.trim()) {
-                                updateAiMessage(batchedAiContent)
+                            if (_batchedAiContent.value.trim() != trimmedContent.trim()) {
+                                updateAiMessage(_batchedAiContent.value)
                             }
                             
                             // 任务完成
@@ -269,12 +270,12 @@ class MessageProcessingDelegate(
         updateJob = null
         
         // 确保最终内容被更新到UI
-        if (batchedAiContent.isNotBlank()) {
-            updateAiMessage(batchedAiContent)
+        if (_batchedAiContent.value.isNotBlank()) {
+            updateAiMessage(_batchedAiContent.value)
         }
         
         // 重置批处理变量
-        batchedAiContent = ""
+        _batchedAiContent.value = ""
         lastAiUpdateTime = 0
         
         _isLoading.value = false
@@ -295,7 +296,7 @@ class MessageProcessingDelegate(
                 updateJob = null
                 
                 // 重置批处理变量
-                batchedAiContent = ""
+//                _batchedAiContent.value = ""
                 lastAiUpdateTime = 0
                 
                 // 首先设置标志，避免其他操作继续处理

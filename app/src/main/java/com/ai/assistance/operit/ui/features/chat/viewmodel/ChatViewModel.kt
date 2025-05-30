@@ -112,6 +112,10 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         messageProcessingDelegate.inputProcessingMessage
     }
 
+    val batchedAiContent: StateFlow<String> by lazy {
+        messageProcessingDelegate.batchedAiContent
+    }
+
     // UI状态相关
     val errorMessage: StateFlow<String?> by lazy { uiStateDelegate.errorMessage }
     val popupMessage: StateFlow<String?> by lazy { uiStateDelegate.popupMessage }

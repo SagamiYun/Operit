@@ -15,14 +15,11 @@ import com.ai.assistance.operit.data.model.voice.VoicePreferences
 import com.ai.assistance.operit.data.preferences.voice.VoicePreferencesManager
 import com.ai.assistance.operit.services.voice.VoiceInteractionService
 import com.ai.assistance.operit.ui.features.chat.viewmodel.ChatViewModel
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Job
 
 /**
  * ViewModel for the AIAgent screen that manages voice interactions with the AI.
@@ -71,6 +68,9 @@ class AIAgentViewModel(application: Application) : AndroidViewModel(application)
 
     private val _lastProcessedMessage = MutableStateFlow("")
     private val _lastAIResponse = MutableStateFlow("")
+
+    // 跟踪是否是正在等待响应完成
+    private val _waitingForResponseCompletion = MutableStateFlow(false)
 
     companion object {
         private const val TAG = "AIAgentViewModel"
@@ -177,11 +177,13 @@ class AIAgentViewModel(application: Application) : AndroidViewModel(application)
 
         // Set flag to prevent duplicate processing
         _processingAIRequest.value = true
+        _waitingForResponseCompletion.value = true
 
         // Check if this is a duplicate message
         if (userText == _lastProcessedMessage.value) {
             Log.d(TAG, "Duplicate message detected, ignoring: $userText")
             _processingAIRequest.value = false
+            _waitingForResponseCompletion.value = false
             return
         }
 
@@ -194,95 +196,236 @@ class AIAgentViewModel(application: Application) : AndroidViewModel(application)
         // 添加时间戳防止取到错误的resp
         val sendTimeMillis = System.currentTimeMillis()
 
-        // 用于跟踪流式响应中已经朗读的内容
-        var lastSpokenContent = ""
+//        // 监控AI响应以更新UI，但不立即朗读
+//        viewModelScope.launch {
+//            try {
+//                chatViewModel.chatHistory.collectLatest { messages ->
+//                    val latestMessage = messages.lastOrNull { it.sender == "ai" }
+//                    val latestUserMessage = messages.lastOrNull { it.sender == "user" }
+//
+//                    // 确保我们处理的是回应当前用户消息的AI响应
+//                    if (messages.isNotEmpty() &&
+//                        messages.lastOrNull()?.sender == "ai" &&
+//                        latestUserMessage?.timestamp == sendTimeMillis) {
+//
+//                        latestMessage?.let { aiMessage ->
+//                            val currentContent = aiMessage.content
+//
+//                            // 更新当前响应UI
+//                            _currentResponse.value = currentContent
+//
+//                            // 保存最终的AI响应内容（会不断更新，直到响应完成）
+//                            _finalAIResponse.value = currentContent
+//
+//                            // 记录最后处理的AI响应
+//                            _lastAIResponse.value = currentContent
+//                        }
+//                    }
+//                }
+//            } catch (e: Exception) {
+//                Log.e(TAG, "Error collecting chat history: ${e.message}", e)
+//                _processingAIRequest.value = false
+//                _waitingForResponseCompletion.value = false
+//            }
+//        }
 
-        // 创建一个单独的流式响应处理job
-        var streamingResponseJob: Job? = null
+        // 发送用户消息到ChatViewModel
+        chatViewModel.messageProcessingDelegate.sendUserMessage(sendTimeMillis)
 
-        // Use a single-collect approach to avoid creating multiple observers
-        // that might cause multiple responses to be processed
+        // 监听处理完成事件
         viewModelScope.launch {
             try {
-                // 监听处理完成事件，重置处理标志
                 chatViewModel.messageProcessingDelegate.isLoading.collectLatest { isLoading ->
-                    if (!isLoading && _processingAIRequest.value) {
-                        // 当加载完成且我们标记了处理中状态，进行重置
-                        Log.d(TAG, "AI message processing complete, resetting state")
-                        _processingAIRequest.value = false
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error observing loading state: ${e.message}", e)
-                _processingAIRequest.value = false
-            }
-        }
+                    var cacheText: String = ""
+                    if (!isLoading && _waitingForResponseCompletion.value) {
+                        chatViewModel.chatHistory.collectLatest { messages ->
+                            val latestUserMessage = messages.lastOrNull { it.sender == "user" }
+                            val lastOrNull = messages.lastOrNull()
+                            // 确保我们处理的是回应当前用户消息的AI响应
+                            if (messages.isNotEmpty() &&
+                                lastOrNull?.sender == "ai" &&
+                                latestUserMessage?.timestamp == sendTimeMillis &&
+                                lastOrNull.content != cacheText) {
 
-        // 监控并处理流式响应
-        viewModelScope.launch {
-            try {
-                chatViewModel.chatHistory.collectLatest { messages ->
-                    val latestMessage = messages.lastOrNull { it.sender == "ai" }
-                    val latestUserMessage = messages.lastOrNull { it.sender == "user" }
+                                speakFilterResp(lastOrNull.content)
+                                cacheText = lastOrNull.content;
 
-                    // 确保我们处理的是回应当前用户消息的AI响应
-                    if (messages.isNotEmpty() &&
-                        messages.lastOrNull()?.sender == "ai" &&
-                        latestUserMessage?.timestamp == sendTimeMillis) {
+                                // AI响应加载完成，可以朗读最终结果
+                                _waitingForResponseCompletion.value = false
 
-                        latestMessage?.let { aiMessage ->
-                            val currentContent = aiMessage.content
-
-                            // 只有当内容有更新时才处理
-                            if (currentContent != _lastAIResponse.value) {
-                                // 更新当前响应UI
-                                _currentResponse.value = currentContent
-
-                                // 计算新增的内容
-                                val newContent = if (currentContent.length > lastSpokenContent.length) {
-                                    currentContent.substring(lastSpokenContent.length)
-                                } else {
-                                    // 如果内容变短了（极少发生），重新从头开始
-                                    currentContent
-                                }
-
-                                // 如果有新内容，进行TTS播放
-                                if (newContent.isNotEmpty()) {
-                                    // 取消之前的流式播放job（如果存在）
-                                    streamingResponseJob?.cancel()
-
-                                    // 启动新的job来播放这段新内容
-                                    streamingResponseJob = viewModelScope.launch {
-                                        // 如果我们不在speaking状态，需要进行首次播放
-                                        if (_dialogueState.value != DialogueManager.DialogueState.SPEAKING) {
-                                            // 过滤整个内容并开始播放
-                                            speakFilterResp(currentContent)
-                                        } else {
-                                            // 如果已经在speaking，则添加新的内容到队列
-                                            // 过滤新内容然后添加到TTS队列
-                                            voiceService?.appendToSpeak(filterTextForTTS(newContent))
-                                        }
-
-                                        // 更新已播放内容的指针
-                                        lastSpokenContent = currentContent
-                                    }
-                                }
-
-                                // 记录最后处理的AI响应
-                                _lastAIResponse.value = currentContent
+                                // 重置处理标志
+                                _processingAIRequest.value = false
                             }
                         }
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error collecting chat history: ${e.message}", e)
+                Log.e(TAG, "Error observing loading state: ${e.message}", e)
                 _processingAIRequest.value = false
+                _waitingForResponseCompletion.value = false
             }
         }
+    }
 
-        chatViewModel.messageProcessingDelegate.sendUserMessage(sendTimeMillis)
+    /**
+     * 从完整的AI回复中提取出最终的用户可读回复部分
+     * 过滤掉工具调用、思考过程等技术细节
+     */
+    private fun extractFinalResponse(fullContent: String): String {
+        if (fullContent.isBlank()) return ""
 
-        // AI请求处理完成的标志会在handleResponseComplete中重置
+        try {
+            var content = fullContent
+            
+            // 存储检测到的非技术性文本，用于最后组合
+            val humanReadableParts = mutableListOf<String>()
+            
+            // 工具调用标签模式，更严格的匹配完整的工具调用块
+            val fullToolPattern = Regex("<tool\\s+name=\"[^\"]+\"[^>]*>[\\s\\S]*?</tool>")
+            content = content.replace(fullToolPattern, "")
+            
+            // 单行自闭合工具标签
+            val selfClosingToolPattern = Regex("<tool[^>]*/>")
+            content = content.replace(selfClosingToolPattern, "")
+            
+            // 参数标签 - 更精确匹配
+            val paramPattern = Regex("<param\\s+name=\"[^\"]+\">[\\s\\S]*?</param>")
+            content = content.replace(paramPattern, "")
+            
+            // 状态标签 - 完整匹配所有类型
+            val allStatusTags = listOf(
+                // 执行中状态 - 完整匹配
+                Regex("<status\\s+type=\"executing\"[^>]*>[\\s\\S]*?</status>"),
+                // 结果状态 - 完整匹配，可能包含成功信息
+                Regex("<status\\s+type=\"result\"[^>]*>[\\s\\S]*?</status>"),
+                // 错误状态
+                Regex("<status\\s+type=\"error\"[^>]*>[\\s\\S]*?</status>"),
+                // 警告状态
+                Regex("<status\\s+type=\"warning\"[^>]*>[\\s\\S]*?</status>"),
+                // 完成状态
+                Regex("<status\\s+type=\"complete\"[^>]*>[\\s\\S]*?</status>"),
+                // 思考状态
+                Regex("<status\\s+type=\"thinking\"[^>]*>[\\s\\S]*?</status>"),
+                // 等待用户状态
+                Regex("<status\\s+type=\"wait_for_user_need\"[^>]*>[\\s\\S]*?</status>"),
+                // 任何其他状态标签 - 通用匹配
+                Regex("<status[^>]*>[\\s\\S]*?</status>"),
+                // 自闭合状态标签
+                Regex("<status[^>]*/>")
+            )
+            
+            for (pattern in allStatusTags) {
+                content = content.replace(pattern, "")
+            }
+            
+            // 工具结果标签 - 完整匹配，确保嵌套内容也被处理
+            val toolResultPattern = Regex("<tool_result\\s+name=\"[^\"]+\"\\s+status=\"[^\"]+\">[\\s\\S]*?</tool_result>")
+            content = content.replace(toolResultPattern, "")
+            
+            // 内容标签 - 完整匹配
+            val contentTagPattern = Regex("<content>[\\s\\S]*?</content>")
+            content = content.replace(contentTagPattern, "")
+            
+            // 清除其他可能的XML标签
+            val otherTagsPattern = Regex("</?[a-zA-Z][^>]*>")
+            content = content.replace(otherTagsPattern, "")
+            
+            // 删除工具执行成功的特定格式文本
+            val successPattern = Regex("(?:成功启动应用|Successfully launched app|成功执行)[^\\n。]*")
+            content = content.replace(successPattern, "")
+            
+            // 删除工具不可用的特定格式文本
+            val toolNotAvailablePattern = Regex("(?:[Tt]he tool|[Tt]ool)\\s+[`'\"]?[\\w:]+[`'\"]?\\s+is not available[^\\n]*")
+            content = content.replace(toolNotAvailablePattern, "")
+            
+            // 处理使用包的相关信息
+            val packageInfoPattern = Regex("(?:[Uu]sing package|use_package):[^\\n]*")
+            content = content.replace(packageInfoPattern, "")
+            
+            // 处理工具类型信息
+            val toolTypePattern = Regex("(?:time|daily_life):[\\w:]+[^\\n]*")
+            content = content.replace(toolTypePattern, "")
+            
+            // 处理可用工具信息
+            val availableToolsPattern = Regex("Available tools[^\\n]*")
+            content = content.replace(availableToolsPattern, "")
+            
+            // 处理描述信息
+            val descriptionPattern = Regex("Description:[^\\n]*")
+            content = content.replace(descriptionPattern, "")
+            
+            // 处理时间信息
+            val timePattern = Regex("Use Time:[^\\n]*")
+            content = content.replace(timePattern, "")
+            
+            // 处理任务完成信息
+            val taskCompletedPattern = Regex("Task completed")
+            content = content.replace(taskCompletedPattern, "")
+            
+            // 清理多余空白
+            content = content
+                .replace(Regex("\\n{3,}"), "\n\n") // 将3个以上连续换行减为2个
+                .replace(Regex("^\\s+"), "") // 清理开头空白
+                .replace(Regex("\\s+$"), "") // 清理结尾空白
+                .replace(Regex("[ \\t]+\\n"), "\n") // 清理行尾空白
+                .replace(Regex("\\n[ \\t]+"), "\n") // 清理行首空白
+                .trim()
+            
+            // 检查是否有任何有意义的内容剩下
+            if (content.isBlank()) {
+                // 尝试从原始内容中提取最后的人类可读内容
+                // 通常工具调用完成后会有一条结论性语句
+                val sentences = fullContent
+                    .replace(Regex("<[^>]*>"), "\n") // 将所有标签替换为换行
+                    .split(Regex("[.。!！?？\n]+")) // 按句子分隔符和换行符分割
+                    .filter { it.trim().length > 5 } // 过滤掉太短的句子
+                    .filter { !it.contains(Regex("成功[^。]*:|Successfully|is not available|[Aa]vailable tools|[Dd]escription:|[Uu]se [Tt]ime:|[Tt]ask completed")) } // 过滤技术内容
+                
+                // 返回最后一个句子，通常是总结
+                val lastSentence = sentences.lastOrNull { it.trim().isNotEmpty() }
+                if (lastSentence != null) {
+                    return lastSentence.trim()
+                }
+                
+                // 如果无法提取句子，尝试匹配最后的中文内容
+                val chineseContent = extractChineseContent(fullContent)
+                if (chineseContent.isNotBlank()) {
+                    return chineseContent
+                }
+                
+                // 兜底：返回净化后的原始内容
+                return fullContent.replace(Regex("<[^>]*>"), "").trim()
+            }
+            
+            return content
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error extracting final response: ${e.message}", e)
+            // 兜底：如果解析失败，直接移除所有尖括号标签并返回
+            return fullContent.replace(Regex("<[^>]*>"), "").trim()
+        }
+    }
+    
+    /**
+     * 从文本中提取中文内容
+     */
+    private fun extractChineseContent(text: String): String {
+        // TODO
+        // 尝试提取完整的中文段落
+//        val chineseParagraph = Regex("[一-龥，。！？；：、（）""''【】—…《》·]+[。！？]").findAll(text)
+//            .map { it.value }
+//            .joinToString(" ")
+//
+//        if (chineseParagraph.isNotBlank()) {
+//            return chineseParagraph
+//        }
+//
+//        // 如果没有完整段落，尝试提取任何中文内容
+//        val anyChineseContent = Regex("[一-龥，。！？；：、（）""''【】—…《》·]+").findAll(text)
+//            .map { it.value }
+//            .joinToString(" ")
+            
+        return text
     }
 
     /**
@@ -345,8 +488,8 @@ class AIAgentViewModel(application: Application) : AndroidViewModel(application)
     suspend fun speakFilterResp(text: String) {
         if (text.isBlank()) return
 
-        // 对原始文本应用过滤处理
-        val filteredText = filterTextForTTS(text)
+        // 对原始文本应用过滤处理过滤工具标签等
+        val filteredText = filterTextForTTS(extractFinalResponse(text))
 
         // 使用过滤后的文本进行TTS
         voiceService?.speakResponse(filteredText)
@@ -536,6 +679,10 @@ class AIAgentViewModel(application: Application) : AndroidViewModel(application)
      */
     fun clearDialogueHistory() {
         voiceService?.dialogueManager?.clearHistory()
+    }
+
+    fun shutdownDialogueManager() {
+        voiceService?.dialogueManager?.shutdown()
     }
     
     override fun onCleared() {

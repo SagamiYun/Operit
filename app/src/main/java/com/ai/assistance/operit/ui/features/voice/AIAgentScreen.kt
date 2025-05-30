@@ -189,7 +189,11 @@ fun AIAgentScreen(
                 
                 // Close button
                 IconButton(
-                    onClick = onClose,
+                    onClick = {
+//                        viewModel.clearDialogueHistory()
+//                        viewModel.shutdownDialogueManager()
+                        onClose()
+                    },
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
